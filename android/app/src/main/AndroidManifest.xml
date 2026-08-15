@@ -1,5 +1,23 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Required to show the "¿Ya estás libre?" push and any other local
+         notification on Android 13+ (API 33). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Required by flutter_local_notifications' zonedSchedule(...) with
+         AndroidScheduleMode.exactAllowWhileIdle so the busy-until push
+         fires at the precise minute the musician's gig ends, even in
+         Doze mode. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <!-- Re-arms scheduled notifications after the device reboots. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Lets the "¿Ya estás libre?" check-out reminder use
+         AndroidNotificationDetails.fullScreenIntent to wake the screen and
+         heads-up over the lock screen like an alarm/incoming call, instead
+         of sitting quietly in the notification shade. Auto-granted below
+         API 34; on API 34+ NotificationService also calls
+         requestFullScreenIntentPermission() at runtime. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <application
         android:label="vallenato_connect"
         android:name="${applicationName}"

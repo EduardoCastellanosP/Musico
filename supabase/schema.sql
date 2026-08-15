@@ -8,7 +8,6 @@
 create table if not exists public.profiles (
   id                 uuid primary key references auth.users (id) on delete cascade,
   full_name          text not null default '',
-  instrument         text not null default '',
   city               text not null default '',
   experience_years   integer not null default 0 check (experience_years >= 0),
   rating             numeric(2, 1) not null default 5.0 check (rating >= 0 and rating <= 5),
@@ -19,7 +18,6 @@ create table if not exists public.profiles (
   available_to       text not null default '22:00',  -- formato 24h "HH:mm"
   phone              text not null default '',
   avatar_url         text,
-  genre              text not null default 'Vallenato',
   coverage_cities    text[] not null default '{}',
   busy_until         timestamptz,
   created_at         timestamptz not null default now(),
@@ -33,18 +31,101 @@ comment on column public.profiles.busy_until is 'Fin programado de la ocupación
 -- Columnas añadidas después del lanzamiento inicial: reintentables en bases
 -- de datos que ya tenían `profiles` creada antes de que existieran.
 alter table public.profiles
-  add column if not exists genre text not null default 'Vallenato';
-
-alter table public.profiles
-  drop constraint if exists profiles_genre_check;
-alter table public.profiles
-  add constraint profiles_genre_check check (genre in ('Vallenato', 'Tropical'));
-
-alter table public.profiles
   add column if not exists coverage_cities text[] not null default '{}';
 
 alter table public.profiles
   add column if not exists busy_until timestamptz;
+
+-- =========================================================
+-- 1.1 Selección múltiple: instrumentos, géneros y servicios
+-- Reemplaza las columnas escalares `instrument`/`genre` por arreglos, y
+-- añade `services` para que un músico pueda ofrecerse como "Músico",
+-- "Sonido", "Ensayadero", etc. al mismo tiempo. `service_description` es el
+-- inventario/descripción libre para servicios técnicos (sonido, ensayadero,
+-- ...); `availability_note` es la franja horaria habitual que el músico
+-- describe mientras está "libre" (cuando está "ocupado" se usan en cambio
+-- `available_from`/`available_to`, ya existentes, como el rango exacto de la
+-- jornada actual).
+-- =========================================================
+alter table public.profiles
+  add column if not exists instruments text[] not null default '{}';
+
+alter table public.profiles
+  add column if not exists genres text[] not null default '{}';
+
+alter table public.profiles
+  add column if not exists services text[] not null default '{}';
+
+alter table public.profiles
+  add column if not exists service_description text not null default '';
+
+alter table public.profiles
+  add column if not exists availability_note text not null default '';
+
+-- Backfill único: copia los valores escalares existentes a los nuevos
+-- arreglos antes de retirar las columnas viejas `instrument`/`genre`. El
+-- bloque completo es un no-op seguro en instalaciones nuevas, donde esas
+-- columnas nunca existieron.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'instrument'
+  ) then
+    update public.profiles
+    set instruments = array[instrument]
+    where coalesce(instrument, '') <> '' and instruments = '{}';
+
+    update public.profiles
+    set services = array['Músico']
+    where services = '{}' and coalesce(instrument, '') <> '';
+
+    alter table public.profiles drop column instrument;
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'profiles' and column_name = 'genre'
+  ) then
+    update public.profiles
+    set genres = array[genre]
+    where coalesce(genre, '') <> '' and genres = '{}';
+
+    update public.profiles
+    set services = array['Músico']
+    where services = '{}' and coalesce(genre, '') <> '';
+
+    alter table public.profiles drop constraint if exists profiles_genre_check;
+    alter table public.profiles drop column genre;
+  end if;
+end $$;
+
+comment on column public.profiles.instruments is 'Instrumentos que toca el músico (selección múltiple). Vacío si solo ofrece servicios técnicos.';
+comment on column public.profiles.genres is 'Géneros musicales que interpreta (selección múltiple).';
+comment on column public.profiles.services is 'Servicios ofrecidos: "Músico", "Sonido", "Ensayadero", etc. (selección múltiple).';
+comment on column public.profiles.service_description is 'Inventario/descripción libre de servicios técnicos (sonido, ensayadero, ...).';
+comment on column public.profiles.availability_note is 'Franja horaria habitual descrita en texto libre mientras el músico está "libre".';
+
+-- =========================================================
+-- 1.2 Índices para los filtros multinivel del directorio
+-- GIN para los `.contains()`/`cs` que dispara cada chip de instrumento,
+-- género o servicio, y para la cláusula `coverage_cities.cs.{"..."}` del
+-- filtro geográfico "Cercanías"; btree para el `city.eq.` que lo acompaña.
+-- =========================================================
+create index if not exists profiles_instruments_gin_idx
+  on public.profiles using gin (instruments);
+
+create index if not exists profiles_genres_gin_idx
+  on public.profiles using gin (genres);
+
+create index if not exists profiles_services_gin_idx
+  on public.profiles using gin (services);
+
+create index if not exists profiles_coverage_cities_gin_idx
+  on public.profiles using gin (coverage_cities);
+
+create index if not exists profiles_city_idx
+  on public.profiles (city);
 
 -- =========================================================
 -- 2. Tabla `contact_events`
@@ -237,10 +318,12 @@ create policy "musician_photos_storage_delete"
   );
 
 -- =========================================================
--- 8. Búsqueda por nombre, ciudad base o cobertura geográfica
+-- 8. Búsqueda global: nombre, ciudad, cobertura, instrumentos, géneros y
+-- servicios
 -- Usada por `MusicianRepository.fetchMusicians` cuando hay un término de
--- búsqueda: PostgREST permite seguir filtrando (instrumento, género, solo
--- libres) y ordenando sobre el resultado de esta función.
+-- búsqueda: PostgREST permite seguir filtrando (instrumento, género,
+-- servicio, solo libres, cercanía geográfica) y ordenando sobre el
+-- resultado de esta función, igual que si fuera un `select()` normal.
 -- =========================================================
 create or replace function public.search_musicians(search_term text)
 returns setof public.profiles
@@ -256,6 +339,18 @@ as $$
     or exists (
       select 1 from unnest(p.coverage_cities) as covered_city
       where covered_city ilike '%' || search_term || '%'
+    )
+    or exists (
+      select 1 from unnest(p.instruments) as instrument
+      where instrument ilike '%' || search_term || '%'
+    )
+    or exists (
+      select 1 from unnest(p.genres) as genre
+      where genre ilike '%' || search_term || '%'
+    )
+    or exists (
+      select 1 from unnest(p.services) as service
+      where service ilike '%' || search_term || '%'
     );
 $$;
 

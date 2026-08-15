@@ -38,7 +38,11 @@ class _DashboardScreenState extends State<DashboardScreen>
   String _search = '';
   String? _selectedInstrument;
   String? _selectedGenre;
+  String? _selectedService;
   bool _onlyFree = false;
+  // Requirement 4 default: "Cercanías" (near the musician's own city). The
+  // dashboard's "Toda Colombia" switch flips this to search nationwide.
+  bool _searchNationwide = false;
   bool _loading = true;
   String? _error;
 
@@ -55,7 +59,16 @@ class _DashboardScreenState extends State<DashboardScreen>
       const Duration(seconds: 60),
       (_) => _loadProfile(),
     );
-    _loadProfile();
+    _initialLoad();
+  }
+
+  /// Loads the logged-in musician's own profile before the first directory
+  /// fetch — the "Cercanías" filter needs `_currentProfile?.city` as
+  /// [MusicianRepository.fetchMusicians]'s `nearCity`, so the very first
+  /// query the user sees should already be scoped correctly instead of
+  /// flashing a nationwide list for a frame.
+  Future<void> _initialLoad() async {
+    await _loadProfile();
     _loadMusicians();
   }
 
@@ -115,8 +128,11 @@ class _DashboardScreenState extends State<DashboardScreen>
       final musicians = await _repository.fetchMusicians(
         instrument: _selectedInstrument,
         genre: _selectedGenre,
+        service: _selectedService,
         onlyFree: _onlyFree,
         search: _search,
+        nearCity: _currentProfile?.city,
+        searchNationwide: _searchNationwide,
       );
       if (!mounted) return;
       setState(() {
@@ -151,8 +167,18 @@ class _DashboardScreenState extends State<DashboardScreen>
     _loadMusicians();
   }
 
+  void _onServiceSelected(String? service) {
+    setState(() => _selectedService = service);
+    _loadMusicians();
+  }
+
   void _onOnlyFreeChanged(bool value) {
     setState(() => _onlyFree = value);
+    _loadMusicians();
+  }
+
+  void _onNationwideChanged(bool value) {
+    setState(() => _searchNationwide = value);
     _loadMusicians();
   }
 
@@ -202,8 +228,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                   onGenreSelected: _onGenreSelected,
                   selectedInstrument: _selectedInstrument,
                   onInstrumentSelected: _onInstrumentSelected,
+                  selectedService: _selectedService,
+                  onServiceSelected: _onServiceSelected,
                   onlyFree: _onlyFree,
                   onOnlyFreeChanged: _onOnlyFreeChanged,
+                  searchNationwide: _searchNationwide,
+                  onNationwideChanged: _onNationwideChanged,
+                  homeCity: _currentProfile?.city,
                 ),
               ),
               const SliverToBoxAdapter(child: SizedBox(height: 12)),

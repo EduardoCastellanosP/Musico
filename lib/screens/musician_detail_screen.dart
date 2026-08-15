@@ -96,7 +96,7 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  GenreBadge(genre: musician.genre),
+                  GenreBadge(genres: musician.genres),
                 ],
               ),
             ),
@@ -104,7 +104,10 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
             Center(
               child: Text(
                 [
-                  if (musician.instrument.isNotEmpty) musician.instrument,
+                  if (musician.instruments.isNotEmpty)
+                    musician.instrumentsSummary
+                  else if (musician.services.isNotEmpty)
+                    musician.services.join(' · '),
                   if (musician.city.isNotEmpty) musician.city,
                 ].join(' · '),
                 style: theme.textTheme.bodyMedium?.copyWith(
@@ -137,6 +140,39 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
             ),
             const SizedBox(height: 18),
             _AvailabilityBanner(musician: musician),
+            if (musician.services.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Servicios',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: extension?.textSecondary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final service in musician.services)
+                    Chip(
+                      label: Text(service),
+                      backgroundColor: extension?.inputFill,
+                      side: BorderSide.none,
+                      labelStyle: theme.textTheme.bodySmall,
+                    ),
+                ],
+              ),
+            ],
+            if (musician.serviceDescription.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                musician.serviceDescription,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: extension?.textSecondary,
+                ),
+              ),
+            ],
             if (musician.coverageCities.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text(

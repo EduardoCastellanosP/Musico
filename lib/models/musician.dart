@@ -1,4 +1,4 @@
-import '../core/constants/genres.dart';
+import '../core/constants/services.dart';
 
 /// Domain model for a row in the Supabase `profiles` table.
 ///
@@ -10,7 +10,7 @@ class Musician {
   const Musician({
     required this.id,
     required this.fullName,
-    required this.instrument,
+    required this.instruments,
     required this.city,
     required this.experienceYears,
     required this.rating,
@@ -21,7 +21,10 @@ class Musician {
     required this.availableTo,
     required this.phone,
     required this.avatarUrl,
-    required this.genre,
+    required this.genres,
+    required this.services,
+    required this.serviceDescription,
+    required this.availabilityNote,
     required this.coverageCities,
     required this.busyUntil,
   });
@@ -32,7 +35,7 @@ class Musician {
       fullName: (json['full_name'] as String?)?.trim().isNotEmpty == true
           ? json['full_name'] as String
           : 'Músico sin nombre',
-      instrument: json['instrument'] as String? ?? '',
+      instruments: _stringList(json['instruments']),
       city: json['city'] as String? ?? '',
       experienceYears: (json['experience_years'] as num?)?.toInt() ?? 0,
       rating: (json['rating'] as num?)?.toDouble() ?? 0,
@@ -43,23 +46,28 @@ class Musician {
       availableTo: json['available_to'] as String? ?? '22:00',
       phone: json['phone'] as String? ?? '',
       avatarUrl: json['avatar_url'] as String?,
-      genre: (json['genre'] as String?)?.trim().isNotEmpty == true
-          ? json['genre'] as String
-          : MusicGenres.fallback,
-      coverageCities:
-          (json['coverage_cities'] as List<dynamic>?)
-              ?.map((city) => city as String)
-              .toList() ??
-          const [],
+      genres: _stringList(json['genres']),
+      services: _stringList(json['services']),
+      serviceDescription: json['service_description'] as String? ?? '',
+      availabilityNote: json['availability_note'] as String? ?? '',
+      coverageCities: _stringList(json['coverage_cities']),
       busyUntil: json['busy_until'] != null
           ? DateTime.tryParse(json['busy_until'] as String)
           : null,
     );
   }
 
+  static List<String> _stringList(dynamic value) =>
+      (value as List<dynamic>?)?.map((item) => item as String).toList() ??
+      const [];
+
   final String id;
   final String fullName;
-  final String instrument;
+
+  /// Instruments this musician plays. Empty when they only offer a
+  /// technical [services] (sound, rehearsal space, etc.).
+  final List<String> instruments;
+
   final String city;
   final int experienceYears;
   final double rating;
@@ -67,7 +75,8 @@ class Musician {
   final bool isFree;
   final String statusMessage;
 
-  /// 24h "HH:mm", e.g. "22:00".
+  /// 24h "HH:mm", e.g. "22:00". Only meaningful while [isFree] is false —
+  /// this is the exact start/end of the current "ocupado" window.
   final String availableFrom;
 
   /// 24h "HH:mm", e.g. "06:00".
@@ -75,7 +84,24 @@ class Musician {
 
   final String phone;
   final String? avatarUrl;
-  final String genre;
+
+  /// Musical genres this musician performs. Empty when they only offer a
+  /// technical [services].
+  final List<String> genres;
+
+  /// Services offered — e.g. "Músico", "Sonido", "Ensayadero". A profile can
+  /// offer more than one at once.
+  final List<String> services;
+
+  /// Free-text inventory/description for technical services (sound gear,
+  /// rehearsal space capacity, etc.). Empty when no technical service is
+  /// selected.
+  final String serviceDescription;
+
+  /// Free-text usual availability window described while [isFree] is true,
+  /// e.g. "Fines de semana en la noche". Distinct from [availableFrom]/
+  /// [availableTo], which only apply to the current "ocupado" window.
+  final String availabilityNote;
 
   /// Extra municipalities the musician travels to, beyond their base [city].
   final List<String> coverageCities;
@@ -84,12 +110,20 @@ class Musician {
   /// auto check-out assistant. Null while free or when no limit was set.
   final DateTime? busyUntil;
 
+  bool get offersMusicianService => services.contains(MusicianServices.musician);
+
+  bool get offersTechnicalService =>
+      services.any(MusicianServices.technical.contains);
+
   Musician copyWith({
     String? fullName,
-    String? instrument,
+    List<String>? instruments,
     String? city,
     String? phone,
-    String? genre,
+    List<String>? genres,
+    List<String>? services,
+    String? serviceDescription,
+    String? availabilityNote,
     List<String>? coverageCities,
     bool? isFree,
     String? statusMessage,
@@ -101,7 +135,7 @@ class Musician {
     return Musician(
       id: id,
       fullName: fullName ?? this.fullName,
-      instrument: instrument ?? this.instrument,
+      instruments: instruments ?? this.instruments,
       city: city ?? this.city,
       experienceYears: experienceYears,
       rating: rating,
@@ -112,7 +146,10 @@ class Musician {
       availableTo: availableTo ?? this.availableTo,
       phone: phone ?? this.phone,
       avatarUrl: avatarUrl,
-      genre: genre ?? this.genre,
+      genres: genres ?? this.genres,
+      services: services ?? this.services,
+      serviceDescription: serviceDescription ?? this.serviceDescription,
+      availabilityNote: availabilityNote ?? this.availabilityNote,
       coverageCities: coverageCities ?? this.coverageCities,
       busyUntil: clearBusyUntil ? null : (busyUntil ?? this.busyUntil),
     );
@@ -139,10 +176,20 @@ class Musician {
 
   String get availableTo12h => _to12h(availableTo);
 
+  /// Comma-joined instruments for compact display, e.g. "Acordeonero, Cajero".
+  String get instrumentsSummary => instruments.join(', ');
+
+  /// Comma-joined genres for compact display, e.g. "Vallenato, Tropical".
+  String get genresSummary => genres.join(', ');
+
   /// e.g. "Libre desde las 10:00 PM" when free, or the musician's own
   /// status message (falling back to their return time) when busy.
   String get availabilityLabel {
-    if (isFree) return 'Libre desde las $availableFrom12h';
+    if (isFree) {
+      return availabilityNote.trim().isNotEmpty
+          ? availabilityNote
+          : 'Libre ahora';
+    }
     if (statusMessage.trim().isNotEmpty) return statusMessage;
     return 'Ocupado · vuelve a las $availableTo12h';
   }

@@ -1,18 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../core/constants/genres.dart';
-import '../core/constants/instruments.dart';
+import '../core/constants/services.dart';
 import '../core/theme/app_theme.dart';
 import '../models/musician.dart';
 import '../models/musician_photo.dart';
 import '../models/musician_stats.dart';
 import '../repositories/musician_repository.dart';
+import '../services/notification_service.dart';
 import 'widgets/status/availability_time_card.dart';
 import 'widgets/status/coverage_cities_card.dart';
 import 'widgets/status/gallery_card.dart';
 import 'widgets/status/message_field_card.dart';
+import 'widgets/status/musician_skills_card.dart';
 import 'widgets/status/profile_info_card.dart';
+import 'widgets/status/service_inventory_card.dart';
+import 'widgets/status/services_card.dart';
 import 'widgets/status/stats_panel.dart';
 import 'widgets/status/status_switch_card.dart';
 
@@ -26,7 +29,8 @@ class StatusScreen extends StatefulWidget {
   State<StatusScreen> createState() => _StatusScreenState();
 }
 
-class _StatusScreenState extends State<StatusScreen> {
+class _StatusScreenState extends State<StatusScreen>
+    with WidgetsBindingObserver {
   final MusicianRepository _repository = MusicianRepository();
   final ImagePicker _imagePicker = ImagePicker();
   final TextEditingController _messageController = TextEditingController();
@@ -34,6 +38,10 @@ class _StatusScreenState extends State<StatusScreen> {
   final TextEditingController _cityController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _coverageCityController = TextEditingController();
+  final TextEditingController _availabilityNoteController =
+      TextEditingController();
+  final TextEditingController _serviceDescriptionController =
+      TextEditingController();
 
   Musician? _profile;
   MusicianStats _stats = MusicianStats.zero;
@@ -41,27 +49,47 @@ class _StatusScreenState extends State<StatusScreen> {
   List<String> _coverageCities = [];
   TimeOfDay _availableFrom = const TimeOfDay(hour: 8, minute: 0);
   TimeOfDay _availableTo = const TimeOfDay(hour: 22, minute: 0);
-  String? _selectedInstrument;
-  String _selectedGenre = MusicGenres.fallback;
+  List<String> _selectedInstruments = [];
+  List<String> _selectedGenres = [];
+  List<String> _selectedServices = [];
   bool _isFree = true;
   bool _loading = true;
   bool _saving = false;
   bool _uploadingPhoto = false;
 
+  bool get _isMusician => _selectedServices.contains(MusicianServices.musician);
+
+  bool get _hasTechnicalService =>
+      _selectedServices.any(MusicianServices.technical.contains);
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _messageController.dispose();
     _fullNameController.dispose();
     _cityController.dispose();
     _phoneController.dispose();
     _coverageCityController.dispose();
+    _availabilityNoteController.dispose();
+    _serviceDescriptionController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Keeps the Libre/Ocupado switch in sync when the "Sí, ya estoy libre"
+    // notification action updated Supabase directly from a background
+    // isolate while this screen was already open.
+    if (state == AppLifecycleState.resumed) {
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -90,13 +118,11 @@ class _StatusScreenState extends State<StatusScreen> {
       _cityController.text = profile.city;
       _phoneController.text = _localPhoneDigits(profile.phone);
       _coverageCities = List<String>.from(profile.coverageCities);
-      _selectedInstrument =
-          VallenatoInstruments.all.contains(profile.instrument)
-          ? profile.instrument
-          : null;
-      _selectedGenre = MusicGenres.all.contains(profile.genre)
-          ? profile.genre
-          : MusicGenres.fallback;
+      _selectedInstruments = List<String>.from(profile.instruments);
+      _selectedGenres = List<String>.from(profile.genres);
+      _selectedServices = List<String>.from(profile.services);
+      _availabilityNoteController.text = profile.availabilityNote;
+      _serviceDescriptionController.text = profile.serviceDescription;
       _availableFrom = _parseTime(profile.availableFrom);
       _availableTo = _parseTime(profile.availableTo);
       _loading = false;
@@ -268,6 +294,9 @@ class _StatusScreenState extends State<StatusScreen> {
     if (_phoneController.text.trim().length != 10) {
       return 'Ingresa un número de WhatsApp válido de 10 dígitos.';
     }
+    if (_selectedServices.isEmpty) {
+      return 'Selecciona al menos un servicio que ofreces.';
+    }
     return null;
   }
 
@@ -288,12 +317,17 @@ class _StatusScreenState extends State<StatusScreen> {
     try {
       final fullName = _fullNameController.text.trim();
       final city = _cityController.text.trim();
-      final instrument = _selectedInstrument ?? '';
       final phone = '+57${_phoneController.text.trim()}';
       final statusMessage = _messageController.text.trim();
+      final availabilityNote = _availabilityNoteController.text.trim();
+      final serviceDescription = _serviceDescriptionController.text.trim();
       final availableFrom = _formatTime(_availableFrom);
       final availableTo = _formatTime(_availableTo);
       final busyUntil = _isFree ? null : _computeBusyUntil();
+      final instruments = _isMusician
+          ? _selectedInstruments
+          : <String>[];
+      final genres = _isMusician ? _selectedGenres : <String>[];
 
       await Future.wait([
         _repository.updateMusicianStatus(
@@ -301,31 +335,46 @@ class _StatusScreenState extends State<StatusScreen> {
           statusMessage: statusMessage,
           availableFrom: availableFrom,
           availableTo: availableTo,
+          availabilityNote: availabilityNote,
           busyUntil: busyUntil,
         ),
         _repository.updateMusicianProfile(
           fullName: fullName,
-          instrument: instrument,
+          instruments: instruments,
           city: city,
           phone: phone,
-          genre: _selectedGenre,
+          genres: genres,
+          services: _selectedServices,
+          serviceDescription: _hasTechnicalService ? serviceDescription : '',
           coverageCities: _coverageCities,
         ),
       ]);
+
+      if (busyUntil != null) {
+        await NotificationService.instance.scheduleBusyUntilNotification(
+          busyUntil: busyUntil,
+          statusMessage: statusMessage,
+        );
+      } else {
+        await NotificationService.instance.cancelBusyUntilNotification();
+      }
 
       if (!mounted) return;
       setState(() {
         _profile = _profile?.copyWith(
           fullName: fullName,
-          instrument: instrument,
+          instruments: instruments,
           city: city,
           phone: phone,
-          genre: _selectedGenre,
+          genres: genres,
+          services: _selectedServices,
+          serviceDescription: _hasTechnicalService ? serviceDescription : '',
           coverageCities: _coverageCities,
           isFree: _isFree,
           statusMessage: statusMessage,
           availableFrom: availableFrom,
           availableTo: availableTo,
+          availabilityNote: availabilityNote,
           busyUntil: busyUntil,
           clearBusyUntil: busyUntil == null,
         );
@@ -383,6 +432,8 @@ class _StatusScreenState extends State<StatusScreen> {
                   ),
                   const SizedBox(height: 16),
                   AvailabilityTimeCard(
+                    isFree: _isFree,
+                    availabilityNoteController: _availabilityNoteController,
                     from: _availableFrom,
                     to: _availableTo,
                     onPickFrom: () => _pickTime(isFrom: true),
@@ -395,14 +446,30 @@ class _StatusScreenState extends State<StatusScreen> {
                     fullNameController: _fullNameController,
                     cityController: _cityController,
                     phoneController: _phoneController,
-                    selectedInstrument: _selectedInstrument,
-                    onInstrumentChanged: (value) =>
-                        setState(() => _selectedInstrument = value),
-                    selectedGenre: _selectedGenre,
-                    onGenreChanged: (value) => setState(
-                      () => _selectedGenre = value ?? _selectedGenre,
-                    ),
                   ),
+                  if (_isMusician) ...[
+                    const SizedBox(height: 16),
+                    MusicianSkillsCard(
+                      selectedInstruments: _selectedInstruments,
+                      onInstrumentsChanged: (value) =>
+                          setState(() => _selectedInstruments = value),
+                      selectedGenres: _selectedGenres,
+                      onGenresChanged: (value) =>
+                          setState(() => _selectedGenres = value),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  ServicesCard(
+                    selectedServices: _selectedServices,
+                    onChanged: (value) =>
+                        setState(() => _selectedServices = value),
+                  ),
+                  if (_hasTechnicalService) ...[
+                    const SizedBox(height: 16),
+                    ServiceInventoryCard(
+                      controller: _serviceDescriptionController,
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   CoverageCitiesCard(
                     cities: _coverageCities,

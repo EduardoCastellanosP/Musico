@@ -2,17 +2,23 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
 
-/// "Disponible de [X] a [Y]" — two tappable time fields that open the
-/// native time picker and write straight into `available_from`/`available_to`.
+/// Dynamic availability section: while the musician is "libre" it asks in
+/// free text when they usually play; the moment they flip to "ocupado" it
+/// swaps to the two native [showTimePicker] fields that define exactly when
+/// today's gig starts and ends.
 class AvailabilityTimeCard extends StatelessWidget {
   const AvailabilityTimeCard({
     super.key,
+    required this.isFree,
+    required this.availabilityNoteController,
     required this.from,
     required this.to,
     required this.onPickFrom,
     required this.onPickTo,
   });
 
+  final bool isFree;
+  final TextEditingController availabilityNoteController;
   final TimeOfDay from;
   final TimeOfDay to;
   final VoidCallback onPickFrom;
@@ -42,27 +48,46 @@ class AvailabilityTimeCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Cuándo estás disponible para tocar.',
+            isFree
+                ? 'Cuándo sueles estar disponible para tocar.'
+                : 'A qué hora empieza y termina tu toque de hoy.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: extension?.textSecondary,
             ),
           ),
           const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _TimeField(
-                  label: 'Desde',
-                  time: from,
-                  onTap: onPickFrom,
+          if (isFree)
+            TextField(
+              controller: availabilityNoteController,
+              maxLines: 2,
+              style: theme.textTheme.bodyLarge,
+              decoration: const InputDecoration(
+                hintText:
+                    '¿Cuándo estás disponible para tocar? '
+                    'Ej: Fines de semana desde las 6:00 PM',
+                prefixIcon: Icon(Icons.event_available_outlined),
+              ),
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: _TimeField(
+                    label: '¿Desde qué hora empiezas a tocar?',
+                    time: from,
+                    onTap: onPickFrom,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _TimeField(label: 'Hasta', time: to, onTap: onPickTo),
-              ),
-            ],
-          ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _TimeField(
+                    label: '¿A qué hora te desocupas?',
+                    time: to,
+                    onTap: onPickTo,
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
     );

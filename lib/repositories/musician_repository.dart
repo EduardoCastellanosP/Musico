@@ -21,15 +21,25 @@ class MusicianRepository {
   /// result set (and the "N músicos" count derived from it) always reflects
   /// exactly what matched.
   ///
-  /// A non-empty [search] routes through the `search_musicians` SQL function
-  /// so the term also matches a musician's [Musician.coverageCities], not
-  /// just their name/base city — PostgREST still lets the other filters and
-  /// the ordering below chain on top of the function's result set.
+  /// A non-empty [search] routes through the `search_musicians` SQL function,
+  /// which matches the term against name, base city, coverage cities,
+  /// instruments, genres and services all at once — PostgREST still lets the
+  /// other filters and the ordering below chain on top of the function's
+  /// result set, exactly as if it were a plain `select()`.
+  ///
+  /// Geographic scoping (requirement 4): by default this only returns
+  /// musicians near [nearCity] — their base [Musician.city] matches it, or
+  /// it's one of their [Musician.coverageCities] (they travel there). Set
+  /// [searchNationwide] to `true` (the dashboard's "Toda Colombia" switch)
+  /// to drop that filter and search the whole country.
   Future<List<Musician>> fetchMusicians({
     String? instrument,
     String? genre,
+    String? service,
     bool? onlyFree,
     String? search,
+    String? nearCity,
+    bool searchNationwide = false,
   }) async {
     final term = search?.trim();
     PostgrestFilterBuilder<PostgrestList> query =
@@ -41,13 +51,25 @@ class MusicianRepository {
         : _client.from('profiles').select();
 
     if (instrument != null && instrument.isNotEmpty) {
-      query = query.eq('instrument', instrument);
+      query = query.contains('instruments', [instrument]);
     }
     if (genre != null && genre.isNotEmpty) {
-      query = query.eq('genre', genre);
+      query = query.contains('genres', [genre]);
+    }
+    if (service != null && service.isNotEmpty) {
+      query = query.contains('services', [service]);
     }
     if (onlyFree == true) {
       query = query.eq('is_free', true);
+    }
+
+    final city = nearCity?.trim();
+    if (!searchNationwide && city != null && city.isNotEmpty) {
+      // PostgREST `.or()` syntax: an inline comma-separated list of
+      // `column.operator.value` clauses, OR-ed together. `cs` (contains)
+      // needs the value as a Postgres array literal — `{"City"}` — quoted
+      // so city names with spaces (e.g. "Santa Marta") parse as one element.
+      query = query.or('city.eq.$city,coverage_cities.cs.{"$city"}');
     }
 
     final rows = await query
@@ -72,16 +94,20 @@ class MusicianRepository {
     return Musician.fromJson(row);
   }
 
-  /// Atomically updates the logged-in musician's availability, returning
-  /// window and status message. [busyUntil] is the absolute moment the
-  /// dashboard's auto check-out assistant should treat this "ocupado"
-  /// window as expired — pass `null` when marking free or when no limit
-  /// applies. RLS guarantees a musician can only ever touch their own row.
+  /// Atomically updates the logged-in musician's availability: the
+  /// Libre/Ocupado switch, their current "ocupado" time window, and either
+  /// the status message shown on the dashboard card or the free-text
+  /// [availabilityNote] describing their usual schedule while free.
+  /// [busyUntil] is the absolute moment the dashboard's auto check-out
+  /// assistant should treat this "ocupado" window as expired — pass `null`
+  /// when marking free or when no limit applies. RLS guarantees a musician
+  /// can only ever touch their own row.
   Future<void> updateMusicianStatus({
     required bool isFree,
     required String statusMessage,
     required String availableFrom,
     required String availableTo,
+    required String availabilityNote,
     DateTime? busyUntil,
   }) async {
     final uid = _requireUserId();
@@ -92,22 +118,27 @@ class MusicianRepository {
           'status_message': statusMessage,
           'available_from': availableFrom,
           'available_to': availableTo,
+          'availability_note': availabilityNote,
           'busy_until': busyUntil?.toUtc().toIso8601String(),
         })
         .eq('id', uid);
   }
 
-  /// Updates the logged-in musician's public profile info (name, instrument,
-  /// genre, city, coverage cities, contact phone). Separate from
-  /// [updateMusicianStatus] since these fields describe who the musician is
-  /// rather than their availability right now. RLS guarantees a musician can
-  /// only ever touch their own row.
+  /// Updates the logged-in musician's public profile info: name, city,
+  /// contact phone, coverage cities, the [services] they offer, the
+  /// [instruments]/[genres] they perform (when offering the "Músico"
+  /// service) and/or their [serviceDescription] inventory (when offering a
+  /// technical service). Separate from [updateMusicianStatus] since these
+  /// fields describe who the musician is rather than their availability
+  /// right now. RLS guarantees a musician can only ever touch their own row.
   Future<void> updateMusicianProfile({
     required String fullName,
-    required String instrument,
+    required List<String> instruments,
     required String city,
     required String phone,
-    required String genre,
+    required List<String> genres,
+    required List<String> services,
+    required String serviceDescription,
     required List<String> coverageCities,
   }) async {
     final uid = _requireUserId();
@@ -115,10 +146,12 @@ class MusicianRepository {
         .from('profiles')
         .update({
           'full_name': fullName,
-          'instrument': instrument,
+          'instruments': instruments,
           'city': city,
           'phone': phone,
-          'genre': genre,
+          'genres': genres,
+          'services': services,
+          'service_description': serviceDescription,
           'coverage_cities': coverageCities,
         })
         .eq('id', uid);

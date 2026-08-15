@@ -66,14 +66,16 @@ class MusicianCard extends StatelessWidget {
                                 ),
                               ),
                               const SizedBox(width: 8),
-                              GenreBadge(genre: musician.genre),
+                              GenreBadge(genres: musician.genres),
                             ],
                           ),
                           const SizedBox(height: 2),
                           Text(
                             [
-                              if (musician.instrument.isNotEmpty)
-                                musician.instrument,
+                              if (musician.instruments.isNotEmpty)
+                                musician.instrumentsSummary
+                              else if (musician.services.isNotEmpty)
+                                musician.services.join(' · '),
                               if (musician.city.isNotEmpty) musician.city,
                             ].join(' · '),
                             style: theme.textTheme.bodySmall?.copyWith(

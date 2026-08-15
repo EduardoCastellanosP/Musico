@@ -1,32 +1,23 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/constants/genres.dart';
-import '../../../core/constants/instruments.dart';
 import '../../../core/theme/app_theme.dart';
 import '../phone_input_field.dart';
 
-/// Editable public profile fields — name, instrument, genre, city and
-/// WhatsApp phone — the same data every other musician sees on this
-/// musician's dashboard card.
+/// Editable public identity fields — name, city and WhatsApp phone — the
+/// same data every other musician sees on this musician's dashboard card.
+/// Instruments, genres and services live in their own cards since which of
+/// those show up depends on the services the musician selects.
 class ProfileInfoCard extends StatelessWidget {
   const ProfileInfoCard({
     super.key,
     required this.fullNameController,
     required this.cityController,
     required this.phoneController,
-    required this.selectedInstrument,
-    required this.onInstrumentChanged,
-    required this.selectedGenre,
-    required this.onGenreChanged,
   });
 
   final TextEditingController fullNameController;
   final TextEditingController cityController;
   final TextEditingController phoneController;
-  final String? selectedInstrument;
-  final ValueChanged<String?> onInstrumentChanged;
-  final String selectedGenre;
-  final ValueChanged<String?> onGenreChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -67,40 +58,6 @@ class ProfileInfoCard extends StatelessWidget {
             decoration: const InputDecoration(
               hintText: 'Ej: Carlos "El Rey" Martínez',
               prefixIcon: Icon(Icons.badge_outlined),
-            ),
-          ),
-          const SizedBox(height: 16),
-          _FieldLabel('Instrumento'),
-          const SizedBox(height: 6),
-          DropdownButtonFormField<String>(
-            initialValue: selectedInstrument,
-            items: [
-              for (final instrument in VallenatoInstruments.all)
-                DropdownMenuItem(value: instrument, child: Text(instrument)),
-            ],
-            onChanged: onInstrumentChanged,
-            dropdownColor: extension?.cardColor ?? theme.cardColor,
-            style: theme.textTheme.bodyLarge,
-            decoration: const InputDecoration(
-              hintText: 'Selecciona tu instrumento',
-              prefixIcon: Icon(Icons.music_note_outlined),
-            ),
-          ),
-          const SizedBox(height: 16),
-          _FieldLabel('Género musical'),
-          const SizedBox(height: 6),
-          DropdownButtonFormField<String>(
-            initialValue: selectedGenre,
-            items: [
-              for (final genre in MusicGenres.all)
-                DropdownMenuItem(value: genre, child: Text(genre)),
-            ],
-            onChanged: onGenreChanged,
-            dropdownColor: extension?.cardColor ?? theme.cardColor,
-            style: theme.textTheme.bodyLarge,
-            decoration: const InputDecoration(
-              hintText: 'Selecciona tu género musical',
-              prefixIcon: Icon(Icons.library_music_outlined),
             ),
           ),
           const SizedBox(height: 16),
