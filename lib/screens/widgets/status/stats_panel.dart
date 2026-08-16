@@ -18,6 +18,7 @@ class StatsPanel extends StatelessWidget {
         Expanded(
           child: _StatTile(
             icon: Icons.today_rounded,
+            iconColor: AppColors.profileAccent,
             label: 'Contactos hoy',
             value: '${stats.contactsToday}',
           ),
@@ -26,6 +27,7 @@ class StatsPanel extends StatelessWidget {
         Expanded(
           child: _StatTile(
             icon: Icons.calendar_month_rounded,
+            iconColor: AppColors.profileAccent,
             label: 'Este mes',
             value: '${stats.contactsThisMonth}',
           ),
@@ -33,7 +35,10 @@ class StatsPanel extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(
           child: _StatTile(
+            // Kept as the traditional gold rating star — every other accent
+            // on this screen is the blue `profileAccent`.
             icon: Icons.star_rounded,
+            iconColor: AppColors.accent,
             label: 'Rating',
             value: rating.toStringAsFixed(1),
           ),
@@ -46,11 +51,13 @@ class StatsPanel extends StatelessWidget {
 class _StatTile extends StatelessWidget {
   const _StatTile({
     required this.icon,
+    required this.iconColor,
     required this.label,
     required this.value,
   });
 
   final IconData icon;
+  final Color iconColor;
   final String label;
   final String value;
 
@@ -69,7 +76,7 @@ class _StatTile extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Icon(icon, color: AppColors.accent, size: 22),
+          Icon(icon, color: iconColor, size: 22),
           const SizedBox(height: 8),
           Text(
             value,

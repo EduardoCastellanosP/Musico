@@ -28,6 +28,31 @@ abstract final class AppColors {
       offset: const Offset(0, 4),
     ),
   ];
+
+  // Dashboard hero header gradient — deep navy → deep violet in dark mode,
+  // primary blue → a lighter sky blue in light mode — plus the blue "info
+  // chip" treatment (genre pills) and WhatsApp button tint used only on the
+  // dashboard's musician cards. Kept separate from [accent] (gold), which
+  // remains the brand color everywhere else in the app.
+  static const List<Color> dashboardHeaderGradientDark = [
+    Color(0xFF0B1120),
+    Color(0xFF241B4D),
+  ];
+  static const List<Color> dashboardHeaderGradientLight = [
+    Color(0xFF2563EB),
+    Color(0xFF60A5FA),
+  ];
+  static const Color infoChipBackgroundDark = Color(0x551E3A8A);
+  static const Color infoChipForegroundDark = Color(0xFF93C5FD);
+  static const Color infoChipBackgroundLight = Color(0xFFDBEAFE);
+  static const Color infoChipForegroundLight = Color(0xFF1D4ED8);
+  static const Color whatsAppIndigo = Color(0xFF4F46E5);
+
+  /// "Executive Blue" — the accent used across the "Mi Estado" profile
+  /// settings screen (avatar ring, selected pills, add buttons, save CTA)
+  /// instead of the app's gold [accent], which reads poorly there against
+  /// the deep dark background.
+  static const Color profileAccent = Color(0xFF3B82F6);
 }
 
 /// Builds the light/dark [ThemeData] pairs used by [MaterialApp.theme] and

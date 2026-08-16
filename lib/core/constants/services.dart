@@ -8,10 +8,11 @@ abstract final class MusicianServices {
   static const List<String> all = [
     // musician,
     'Sonido',
-    'Ensayadero',
+    'Ensayaderos',
     'Iluminación',
     'Transporte',
-    // 'Alquiler de equipos',
+    'Ingeniero de sonido',
+    'Roadie',
   ];
 
   /// Every service other than [musician] is treated as a technical service

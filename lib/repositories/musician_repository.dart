@@ -7,6 +7,7 @@ import '../models/musician_photo.dart';
 import '../models/musician_stats.dart';
 
 const String _photosBucket = 'musician-photos';
+const String _avatarsBucket = 'avatars';
 
 /// Every read/write the app performs against the `profiles` and
 /// `contact_events` tables goes through here — UI widgets never touch the
@@ -260,6 +261,34 @@ class MusicianRepository {
         .select()
         .single();
     return MusicianPhoto.fromJson(row);
+  }
+
+  /// Uploads [bytes] to the `avatars` bucket under a filename unique to the
+  /// logged-in musician and the current moment, then stores the resulting
+  /// public URL on their `profiles` row. Returns that URL so the caller can
+  /// update its local state immediately without a second round-trip.
+  Future<String> updateAvatar({
+    required Uint8List bytes,
+    required String fileExt,
+  }) async {
+    final uid = _requireUserId();
+    final fileName = '$uid-${DateTime.now().millisecondsSinceEpoch}.$fileExt';
+    final path = '$uid/$fileName';
+
+    await _client.storage
+        .from(_avatarsBucket)
+        .uploadBinary(
+          path,
+          bytes,
+          fileOptions: const FileOptions(upsert: true),
+        );
+    final avatarUrl = _client.storage.from(_avatarsBucket).getPublicUrl(path);
+
+    await _client
+        .from('profiles')
+        .update({'avatar_url': avatarUrl})
+        .eq('id', uid);
+    return avatarUrl;
   }
 
   /// Removes both the storage object and its `musician_photos` row.

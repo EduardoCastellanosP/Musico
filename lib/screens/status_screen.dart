@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -13,6 +15,7 @@ import 'widgets/status/coverage_cities_card.dart';
 import 'widgets/status/gallery_card.dart';
 import 'widgets/status/message_field_card.dart';
 import 'widgets/status/musician_skills_card.dart';
+import 'widgets/status/profile_avatar_editor.dart';
 import 'widgets/status/profile_info_card.dart';
 import 'widgets/status/service_inventory_card.dart';
 import 'widgets/status/services_card.dart';
@@ -56,6 +59,7 @@ class _StatusScreenState extends State<StatusScreen>
   bool _loading = true;
   bool _saving = false;
   bool _uploadingPhoto = false;
+  bool _uploadingAvatar = false;
 
   bool get _isMusician => _selectedServices.contains(MusicianServices.musician);
 
@@ -238,6 +242,38 @@ class _StatusScreenState extends State<StatusScreen>
     }
   }
 
+  Future<void> _updateProfilePicture() async {
+    final XFile? image = await _imagePicker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1024,
+      imageQuality: 85,
+    );
+    if (image == null) return;
+
+    setState(() => _uploadingAvatar = true);
+    try {
+      final bytes = await image.readAsBytes();
+      final fileExt = image.path.contains('.')
+          ? image.path.split('.').last
+          : 'jpg';
+      final avatarUrl = await _repository.updateAvatar(
+        bytes: bytes,
+        fileExt: fileExt.toLowerCase(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _profile = _profile?.copyWith(avatarUrl: avatarUrl);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      _showMessage(
+        'No pudimos actualizar tu foto de perfil. Intenta de nuevo.',
+      );
+    } finally {
+      if (mounted) setState(() => _uploadingAvatar = false);
+    }
+  }
+
   Future<void> _deletePhoto(MusicianPhoto photo) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -324,9 +360,7 @@ class _StatusScreenState extends State<StatusScreen>
       final availableFrom = _formatTime(_availableFrom);
       final availableTo = _formatTime(_availableTo);
       final busyUntil = _isFree ? null : _computeBusyUntil();
-      final instruments = _isMusician
-          ? _selectedInstruments
-          : <String>[];
+      final instruments = _isMusician ? _selectedInstruments : <String>[];
       final genres = _isMusician ? _selectedGenres : <String>[];
 
       await Future.wait([
@@ -394,15 +428,23 @@ class _StatusScreenState extends State<StatusScreen>
     final extension = theme.extension<AppThemeExtension>();
 
     return Scaffold(
+      bottomNavigationBar: (_loading || _profile == null)
+          ? null
+          : _SaveBar(saving: _saving, onSave: _save),
       body: SafeArea(
         child: _loading
             ? const Center(
-                child: CircularProgressIndicator(color: AppColors.accent),
+                child: CircularProgressIndicator(
+                  color: AppColors.profileAccent,
+                ),
               )
             : _profile == null
             ? const Center(child: Text('No encontramos tu perfil.'))
             : ListView(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+                // Extra bottom padding keeps the last cards (Galería,
+                // Estadísticas) from ending up hidden behind the floating
+                // `_SaveBar` once the user scrolls all the way down.
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 110),
                 children: [
                   Row(
                     children: [
@@ -441,6 +483,12 @@ class _StatusScreenState extends State<StatusScreen>
                   ),
                   const SizedBox(height: 16),
                   MessageFieldCard(controller: _messageController),
+                  const SizedBox(height: 16),
+                  ProfileAvatarEditor(
+                    musician: _profile!,
+                    uploading: _uploadingAvatar,
+                    onTap: _updateProfilePicture,
+                  ),
                   const SizedBox(height: 16),
                   ProfileInfoCard(
                     fullNameController: _fullNameController,
@@ -484,31 +532,6 @@ class _StatusScreenState extends State<StatusScreen>
                     onAddPhoto: _addPhoto,
                     onDeletePhoto: _deletePhoto,
                   ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _saving ? null : _save,
-                      child: _saving
-                          ? const SizedBox(
-                              height: 22,
-                              width: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Colors.black,
-                                ),
-                              ),
-                            )
-                          : const Text(
-                              'Guardar cambios',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 16,
-                              ),
-                            ),
-                    ),
-                  ),
                   const SizedBox(height: 28),
                   Text(
                     'Estadísticas',
@@ -520,6 +543,71 @@ class _StatusScreenState extends State<StatusScreen>
                   StatsPanel(stats: _stats, rating: _profile!.rating),
                 ],
               ),
+      ),
+    );
+  }
+}
+
+/// "Guardar cambios" as a frosted-glass bar pinned to the bottom of the
+/// screen (via [Scaffold.bottomNavigationBar]) instead of scrolling away
+/// with the form — it stays reachable no matter how long the profile gets.
+class _SaveBar extends StatelessWidget {
+  const _SaveBar({required this.saving, required this.onSave});
+
+  final bool saving;
+  final VoidCallback onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Container(
+          padding: EdgeInsets.fromLTRB(20, 14, 20, 14 + bottomInset),
+          decoration: BoxDecoration(
+            color: isDark
+                ? const Color(0xE6121212)
+                : Colors.white.withValues(alpha: 0.85),
+            border: Border(
+              top: BorderSide(
+                color: isDark
+                    ? const Color(0xFF27272A)
+                    : Colors.black.withValues(alpha: 0.08),
+              ),
+            ),
+          ),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: saving ? null : onSave,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.profileAccent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 18),
+              ),
+              child: saving
+                  ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Text(
+                      'Guardar cambios',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+            ),
+          ),
+        ),
       ),
     );
   }

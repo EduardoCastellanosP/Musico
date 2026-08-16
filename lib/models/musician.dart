@@ -110,7 +110,8 @@ class Musician {
   /// auto check-out assistant. Null while free or when no limit was set.
   final DateTime? busyUntil;
 
-  bool get offersMusicianService => services.contains(MusicianServices.musician);
+  bool get offersMusicianService =>
+      services.contains(MusicianServices.musician);
 
   bool get offersTechnicalService =>
       services.any(MusicianServices.technical.contains);
@@ -120,6 +121,7 @@ class Musician {
     List<String>? instruments,
     String? city,
     String? phone,
+    String? avatarUrl,
     List<String>? genres,
     List<String>? services,
     String? serviceDescription,
@@ -145,7 +147,7 @@ class Musician {
       availableFrom: availableFrom ?? this.availableFrom,
       availableTo: availableTo ?? this.availableTo,
       phone: phone ?? this.phone,
-      avatarUrl: avatarUrl,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
       genres: genres ?? this.genres,
       services: services ?? this.services,
       serviceDescription: serviceDescription ?? this.serviceDescription,
@@ -188,7 +190,7 @@ class Musician {
     if (isFree) {
       return availabilityNote.trim().isNotEmpty
           ? availabilityNote
-          : 'Libre ahora';
+          : 'Disponible ahora';
     }
     if (statusMessage.trim().isNotEmpty) return statusMessage;
     return 'Ocupado · vuelve a las $availableTo12h';

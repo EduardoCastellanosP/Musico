@@ -220,6 +220,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   onSettingsTap: _openStatusScreen,
                 ),
               ),
+              const SliverToBoxAdapter(child: SizedBox(height: 18)),
               SliverToBoxAdapter(
                 child: SearchFilterBar(
                   searchController: _searchController,

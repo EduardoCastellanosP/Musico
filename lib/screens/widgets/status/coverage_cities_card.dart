@@ -67,8 +67,8 @@ class CoverageCitiesCard extends StatelessWidget {
               IconButton.filled(
                 onPressed: onAdd,
                 style: IconButton.styleFrom(
-                  backgroundColor: AppColors.accent,
-                  foregroundColor: Colors.black,
+                  backgroundColor: AppColors.profileAccent,
+                  foregroundColor: Colors.white,
                   padding: const EdgeInsets.all(14),
                 ),
                 icon: const Icon(Icons.add_rounded),

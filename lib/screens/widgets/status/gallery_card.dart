@@ -94,7 +94,7 @@ class _AddPhotoTile extends StatelessWidget {
           color: extension?.inputFill,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: AppColors.accent.withValues(alpha: 0.4),
+            color: AppColors.profileAccent.withValues(alpha: 0.4),
             style: BorderStyle.solid,
           ),
         ),
@@ -105,7 +105,7 @@ class _AddPhotoTile extends StatelessWidget {
                   height: 22,
                   child: CircularProgressIndicator(
                     strokeWidth: 2.5,
-                    color: AppColors.accent,
+                    color: AppColors.profileAccent,
                   ),
                 ),
               )
@@ -114,7 +114,7 @@ class _AddPhotoTile extends StatelessWidget {
                 children: [
                   const Icon(
                     Icons.add_a_photo_outlined,
-                    color: AppColors.accent,
+                    color: AppColors.profileAccent,
                     size: 26,
                   ),
                   const SizedBox(height: 6),

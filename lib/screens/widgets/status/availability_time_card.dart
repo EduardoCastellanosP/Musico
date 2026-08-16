@@ -141,7 +141,7 @@ class _TimeField extends StatelessWidget {
                 const Icon(
                   Icons.schedule_rounded,
                   size: 18,
-                  color: AppColors.accent,
+                  color: AppColors.profileAccent,
                 ),
               ],
             ),

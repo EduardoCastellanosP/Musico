@@ -46,11 +46,11 @@ class MultiSelectChipField extends StatelessWidget {
             onSelected: (_) => _toggle(option),
             showCheckmark: false,
             backgroundColor: extension?.inputFill,
-            selectedColor: AppColors.accent,
+            selectedColor: AppColors.profileAccent,
             labelStyle: theme.textTheme.labelLarge?.copyWith(
               fontWeight: FontWeight.w600,
               color: selected.contains(option)
-                  ? Colors.black
+                  ? Colors.white
                   : extension?.textSecondary,
             ),
             side: BorderSide(
