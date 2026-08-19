@@ -56,6 +56,13 @@ class NotificationService {
     800,
   ]);
 
+  /// Coral/red for "Sigo ocupado" and vibrant green for "Ya estoy libre" —
+  /// Android only lets an action tint its own label (no button background)
+  /// without the CallStyle notification layout, which flutter_local_notifications
+  /// doesn't expose.
+  static const Color _stillBusyColor = Color(0xFFFF6B5B);
+  static const Color _markFreeColor = Color(0xFF22C55E);
+
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
   bool _initialized = false;
@@ -88,10 +95,13 @@ class NotificationService {
           _busyCategoryId,
           actions: [
             DarwinNotificationAction.plain(
+              stillBusyActionId,
+              'No, sigo ocupado',
+            ),
+            DarwinNotificationAction.plain(
               markFreeActionId,
               'Sí, ya estoy libre',
             ),
-            DarwinNotificationAction.plain(stillBusyActionId, 'Sigo ocupado'),
           ],
           options: {DarwinNotificationCategoryOption.hiddenPreviewShowTitle},
         ),
@@ -126,11 +136,6 @@ class NotificationService {
     );
     await androidPlugin?.requestNotificationsPermission();
     await androidPlugin?.requestExactAlarmsPermission();
-    // Android 14+ (API 34) gates `fullScreenIntent` behind this extra grant
-    // for apps that aren't a default dialer/alarm app; older versions grant
-    // it automatically from the manifest permission. Safe to call on every
-    // version — it's a no-op where it doesn't apply.
-    await androidPlugin?.requestFullScreenIntentPermission();
 
     _initialized = true;
   }
@@ -154,45 +159,48 @@ class NotificationService {
     final scheduledDate = tz.TZDateTime.from(busyUntil, tz.local);
     if (!scheduledDate.isAfter(tz.TZDateTime.now(tz.local))) return;
 
-    final bigText = (statusMessage != null && statusMessage.trim().isNotEmpty)
+    const title = '¿Sigues ocupado?';
+    const body = '¿Ya terminaste tu toque y estás libre de nuevo?';
+    final expandedText =
+        (statusMessage != null && statusMessage.trim().isNotEmpty)
         ? statusMessage.trim()
-        : 'Tu jornada terminó. Actualiza tu estado para que los '
-              'contratantes te vuelvan a ver disponible.';
+        : body;
 
     final androidDetails = AndroidNotificationDetails(
       _busyChannelId,
       _busyChannelName,
       channelDescription: 'Avisos sobre el fin de tu jornada como músico.',
       importance: Importance.max,
-      priority: Priority.max,
-      // Treats this like an incoming call/alarm: it heads-up over the lock
-      // screen, wakes the display and plays through the alarm-grade
-      // vibration pattern set on the channel above, instead of sitting
-      // quietly in the shade like a routine reminder.
-      fullScreenIntent: true,
-      category: AndroidNotificationCategory.alarm,
+      priority: Priority.high,
+      // No fullScreenIntent: max importance + high priority + reminder
+      // category is enough for Android to slide this down as a heads-up
+      // banner over the lock screen, without hijacking the whole display
+      // like an alarm clock.
+      category: AndroidNotificationCategory.reminder,
+      visibility: NotificationVisibility.public,
       playSound: true,
       enableVibration: true,
       vibrationPattern: _urgentVibrationPattern,
       styleInformation: BigTextStyleInformation(
-        bigText,
-        contentTitle: '<b>¡Es hora de actualizar tu estado! 🎶</b>',
-        htmlFormatContentTitle: true,
+        expandedText,
+        contentTitle: title,
         summaryText: 'VallenatoConnect',
       ),
       color: const Color(0xFFD4AF37),
       colorized: true,
       actions: const [
         AndroidNotificationAction(
-          markFreeActionId,
-          'Sí, ya estoy libre',
-          showsUserInterface: false,
-        ),
-        AndroidNotificationAction(
           stillBusyActionId,
-          'Sigo ocupado',
+          'No, sigo ocupado',
+          titleColor: _stillBusyColor,
           showsUserInterface: false,
           cancelNotification: true,
+        ),
+        AndroidNotificationAction(
+          markFreeActionId,
+          'Sí, ya estoy libre',
+          titleColor: _markFreeColor,
+          showsUserInterface: false,
         ),
       ],
     );
@@ -210,8 +218,8 @@ class NotificationService {
     await _plugin.zonedSchedule(
       id: busyStatusNotificationId,
       scheduledDate: scheduledDate,
-      title: '¿Ya estás libre?',
-      body: bigText,
+      title: title,
+      body: body,
       notificationDetails: NotificationDetails(
         android: androidDetails,
         iOS: darwinDetails,

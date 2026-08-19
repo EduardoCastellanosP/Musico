@@ -258,11 +258,11 @@ class SearchFilterBar extends StatelessWidget {
                       ),
                       children: searchNationwide
                           ? const [
-                              TextSpan(text: 'Mostrando músicos de '),
+                              TextSpan(text: 'Mostrando músicos de toda'),
                               TextSpan(
-                                text: 'Toda Colombia',
+                                text: ' Colombia',
                                 style: TextStyle(
-                                  color: AppColors.whatsAppIndigo,
+                                  color: Color(0xFF38BDF8),
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),

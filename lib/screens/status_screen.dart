@@ -11,8 +11,10 @@ import '../models/musician_stats.dart';
 import '../models/musician_video.dart';
 import '../repositories/musician_repository.dart';
 import '../services/auth_service.dart';
-import '../services/notification_service.dart';
-import 'widgets/status/availability_time_card.dart';
+// ponytail: NotificationService desconectado para v1, ver _save().
+// import '../services/notification_service.dart';
+// ponytail: selector de franja horaria oculto para v1, ver build().
+// import 'widgets/status/availability_time_card.dart';
 import 'widgets/status/coverage_cities_card.dart';
 import 'widgets/status/media_manager_card.dart';
 import 'widgets/status/message_field_card.dart';
@@ -156,20 +158,8 @@ class _StatusScreenState extends State<StatusScreen>
     return digits.length > 10 ? digits.substring(digits.length - 10) : digits;
   }
 
-  Future<void> _pickTime({required bool isFrom}) async {
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: isFrom ? _availableFrom : _availableTo,
-    );
-    if (picked == null) return;
-    setState(() {
-      if (isFrom) {
-        _availableFrom = picked;
-      } else {
-        _availableTo = picked;
-      }
-    });
-  }
+  // ponytail: selector de franja horaria oculto para v1 → _pickTime,
+  // eliminado por no tener llamadores; restaurar junto con AvailabilityTimeCard.
 
   void _addCoverageCity(String city) {
     final value = city.trim();
@@ -181,6 +171,21 @@ class _StatusScreenState extends State<StatusScreen>
         value.toLowerCase() == _cityController.text.trim().toLowerCase();
     if (alreadyCovered) return;
     setState(() => _coverageCities = [..._coverageCities, value]);
+  }
+
+  /// v1: el switch Libre/Ocupado ya no espera al botón "Guardar cambios" —
+  /// escribe en Supabase al instante (optimista, con rollback si falla),
+  /// igual que el switch del dashboard.
+  Future<void> _toggleAvailability(bool isFree) async {
+    final previous = _isFree;
+    setState(() => _isFree = isFree);
+    try {
+      await _repository.setAvailability(isFree);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isFree = previous);
+      _showMessage('No pudimos actualizar tu disponibilidad. Intenta de nuevo.');
+    }
   }
 
   void _removeCoverageCity(String city) {
@@ -437,24 +442,8 @@ class _StatusScreenState extends State<StatusScreen>
     }
   }
 
-  /// Combines today's date with the "hasta" time picked in
-  /// [AvailabilityTimeCard] into the absolute cutoff stored in
-  /// `busy_until`. Rolls over to tomorrow when that time has already
-  /// passed today (covers overnight gigs).
-  DateTime _computeBusyUntil() {
-    final now = DateTime.now();
-    var candidate = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      _availableTo.hour,
-      _availableTo.minute,
-    );
-    if (!candidate.isAfter(now)) {
-      candidate = candidate.add(const Duration(days: 1));
-    }
-    return candidate;
-  }
+  // ponytail: selector de franja horaria oculto para v1 → _computeBusyUntil,
+  // eliminado por no tener llamadores; restaurar junto con AvailabilityTimeCard.
 
   String? _validate() {
     if (_fullNameController.text.trim().isEmpty) {
@@ -492,7 +481,9 @@ class _StatusScreenState extends State<StatusScreen>
       final serviceDescription = _serviceDescriptionController.text.trim();
       final availableFrom = _formatTime(_availableFrom);
       final availableTo = _formatTime(_availableTo);
-      final busyUntil = _isFree ? null : _computeBusyUntil();
+      // ponytail: franja horaria oculta para v1 — el switch ya escribió
+      // is_free al instante, así que aquí solo se preserva busy_until.
+      final busyUntil = _isFree ? null : _profile?.busyUntil;
       final instruments = _isMusician ? _selectedInstruments : <String>[];
       final genres = _isMusician ? _selectedGenres : <String>[];
 
@@ -517,14 +508,16 @@ class _StatusScreenState extends State<StatusScreen>
         ),
       ]);
 
-      if (busyUntil != null) {
-        await NotificationService.instance.scheduleBusyUntilNotification(
-          busyUntil: busyUntil,
-          statusMessage: statusMessage,
-        );
-      } else {
-        await NotificationService.instance.cancelBusyUntilNotification();
-      }
+      // ponytail: NotificationService desconectado para v1 — sin
+      // programación automática de notificaciones de "ocupado hasta".
+      // if (busyUntil != null) {
+      //   await NotificationService.instance.scheduleBusyUntilNotification(
+      //     busyUntil: busyUntil,
+      //     statusMessage: statusMessage,
+      //   );
+      // } else {
+      //   await NotificationService.instance.cancelBusyUntilNotification();
+      // }
 
       if (!mounted) return;
       setState(() {
@@ -616,18 +609,18 @@ class _StatusScreenState extends State<StatusScreen>
                   const SizedBox(height: 20),
                   StatusSwitchCard(
                     isFree: _isFree,
-                    onChanged: (value) => setState(() => _isFree = value),
+                    onChanged: _toggleAvailability,
                   ),
-                  const SizedBox(height: 16),
-                  AvailabilityTimeCard(
-                    isFree: _isFree,
-                    availabilityNoteController: _availabilityNoteController,
-                    from: _availableFrom,
-                    to: _availableTo,
-                    onPickFrom: () => _pickTime(isFrom: true),
-                    onPickTo: () => _pickTime(isFrom: false),
-                  ),
-
+                  // ponytail: franja horaria / "ocupado hasta" oculta para v1.
+                  // const SizedBox(height: 16),
+                  // AvailabilityTimeCard(
+                  //   isFree: _isFree,
+                  //   availabilityNoteController: _availabilityNoteController,
+                  //   from: _availableFrom,
+                  //   to: _availableTo,
+                  //   onPickFrom: () => _pickTime(isFrom: true),
+                  //   onPickTo: () => _pickTime(isFrom: false),
+                  // ),
                   const SizedBox(height: 16),
                   MessageFieldCard(controller: _messageController),
                   if (_isMusician) ...[

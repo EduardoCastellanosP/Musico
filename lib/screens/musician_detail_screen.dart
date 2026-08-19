@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../core/constants/whatsapp.dart';
 import '../core/theme/app_theme.dart';
 import '../core/utils/video_thumbnail.dart';
 import '../models/musician.dart';
@@ -235,7 +236,7 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
                       ),
                     ),
                     icon: const Icon(Icons.chat_rounded, size: 18),
-                    label: const Text('WhatsApp'),
+                    label: const Text(kWhatsAppShortLabel),
                   ),
                 ),
                 const SizedBox(width: 10),

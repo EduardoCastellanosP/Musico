@@ -11,13 +11,6 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
     <!-- Re-arms scheduled notifications after the device reboots. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
-    <!-- Lets the "¿Ya estás libre?" check-out reminder use
-         AndroidNotificationDetails.fullScreenIntent to wake the screen and
-         heads-up over the lock screen like an alarm/incoming call, instead
-         of sitting quietly in the notification shade. Auto-granted below
-         API 34; on API 34+ NotificationService also calls
-         requestFullScreenIntentPermission() at runtime. -->
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <application
         android:label="vallenato_connect"
         android:name="${applicationName}"

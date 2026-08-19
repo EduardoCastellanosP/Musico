@@ -1,13 +1,9 @@
 import 'package:flutter/material.dart';
-
+import 'package:flutter_svg/flutter_svg.dart';
+import '../../../core/constants/whatsapp.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/musician.dart';
 
-/// One musician's directory entry: a full-height photo on the left (35-40%
-/// of the card width) and, on the right, name/instrument, genre pills,
-/// city, availability and the two contact actions (WhatsApp / call) the
-/// whole app exists to enable. Tapping anywhere on the card opens the
-/// musician's full detail view.
 class MusicianCard extends StatelessWidget {
   const MusicianCard({
     super.key,
@@ -31,10 +27,6 @@ class MusicianCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 0, 20, 14),
       decoration: BoxDecoration(
-        // Dark mode uses a dedicated navy tone instead of the generic dark
-        // card color — it needs to contrast against the app's near-black
-        // scaffold background, which `extension.cardColor` (one step above
-        // pure black) doesn't do on its own.
         color: isDark
             ? const Color(0xFF1A1F36)
             : (extension?.cardColor ?? theme.cardColor),
@@ -45,7 +37,7 @@ class MusicianCard extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: onTap, // lógica existente
+          onTap: onTap,
           child: IntrinsicHeight(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -68,24 +60,16 @@ class MusicianCard extends StatelessWidget {
   }
 }
 
-/// Left-hand photo. Rounded corners come for free on the left edge only —
-/// the parent [Container]'s `Clip.antiAlias` + `BorderRadius.circular(20)`
-/// clips the whole card, so only the two outer corners this widget touches
-/// (top-left/bottom-left) end up rounded; the seam against the content
-/// column stays a plain vertical cut, exactly as the reference wants.
 class _MusicianImage extends StatelessWidget {
   const _MusicianImage({required this.musician});
-
   final Musician musician;
 
   @override
   Widget build(BuildContext context) {
     final avatarUrl = musician.avatarUrl;
-
     if (avatarUrl == null || avatarUrl.isEmpty) {
       return _InitialsPlaceholder(musician: musician);
     }
-
     return Image.network(
       avatarUrl,
       fit: BoxFit.cover,
@@ -97,7 +81,6 @@ class _MusicianImage extends StatelessWidget {
 
 class _InitialsPlaceholder extends StatelessWidget {
   const _InitialsPlaceholder({required this.musician});
-
   final Musician musician;
 
   @override
@@ -117,8 +100,6 @@ class _InitialsPlaceholder extends StatelessWidget {
   }
 }
 
-/// Right-hand content: name row, instrument subtitle, genre pills, city,
-/// availability and the WhatsApp/Llamar action row.
 class _MusicianCardContent extends StatelessWidget {
   const _MusicianCardContent({
     required this.musician,
@@ -191,10 +172,7 @@ class _MusicianCardContent extends StatelessWidget {
               children: [
                 for (final genre in musician.genres)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: chipBackground,
                       borderRadius: BorderRadius.circular(8),
@@ -214,20 +192,14 @@ class _MusicianCardContent extends StatelessWidget {
             const SizedBox(height: 8),
             Row(
               children: [
-                Icon(
-                  Icons.location_on_rounded,
-                  size: 13,
-                  color: extension?.textSecondary,
-                ),
+                Icon(Icons.location_on_rounded, size: 13, color: extension?.textSecondary),
                 const SizedBox(width: 4),
                 Expanded(
                   child: Text(
                     musician.city,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: extension?.textSecondary,
-                    ),
+                    style: theme.textTheme.bodySmall?.copyWith(color: extension?.textSecondary),
                   ),
                 ),
               ],
@@ -252,9 +224,7 @@ class _MusicianCardContent extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.bodySmall?.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: musician.isFree
-                        ? Colors.green.shade700
-                        : Colors.red.shade700,
+                    color: musician.isFree ? Colors.green.shade700 : Colors.red.shade700,
                   ),
                 ),
               ),
@@ -263,31 +233,39 @@ class _MusicianCardContent extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: _ActionButton(
-                  icon: Icons.chat_rounded,
-                  label: 'WhatsApp',
-                  backgroundColor: AppColors.whatsAppIndigo,
-                  foregroundColor: Colors.white,
-                  onTap: musician.hasPhone
-                      ? onWhatsAppTap
-                      : null, // lógica existente
-                ),
-              ),
+             Expanded(
+  child: SizedBox(
+    height: 40,
+    child: FilledButton(
+      onPressed: musician.hasPhone ? onWhatsAppTap : null,
+      style: FilledButton.styleFrom(
+        backgroundColor: Colors.white, // Fondo blanco visible
+        disabledBackgroundColor: Colors.grey.shade200,
+        elevation: 0,
+        padding: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Colors.grey.shade300, width: 1), // Borde sutil
+        ),
+      ),
+      child: Center(
+        child: SvgPicture.asset(
+          'assets/images/logowpp.svg',
+          width: 24,
+          height: 24,
+        ),
+      ),
+    ),
+  ),
+),
               const SizedBox(width: 8),
               Expanded(
                 child: _ActionButton(
                   icon: Icons.call_rounded,
                   label: 'Llamar',
-                  backgroundColor:
-                      extension?.inputFill ??
-                      (isDark ? Colors.grey[800]! : Colors.grey[200]!),
-                  foregroundColor:
-                      theme.textTheme.bodyLarge?.color ??
-                      extension?.textSecondary,
-                  onTap: musician.hasPhone
-                      ? onCallTap
-                      : null, // lógica existente
+                  backgroundColor: AppColors.whatsAppIndigo,
+                  foregroundColor: Colors.white,
+                  onTap: musician.hasPhone ? onCallTap : null,
                 ),
               ),
             ],
@@ -298,18 +276,18 @@ class _MusicianCardContent extends StatelessWidget {
   }
 }
 
-/// ~40px pill button shared by the WhatsApp/Llamar actions — only the
-/// colors differ between the two.
 class _ActionButton extends StatelessWidget {
   const _ActionButton({
-    required this.icon,
+    this.icon,
+    this.iconWidget,
     required this.label,
     required this.backgroundColor,
     required this.foregroundColor,
     required this.onTap,
-  });
+  }) : assert(icon != null || iconWidget != null, 'Provide either icon or iconWidget');
 
-  final IconData icon;
+  final IconData? icon;
+  final Widget? iconWidget;
   final String label;
   final Color backgroundColor;
   final Color? foregroundColor;
@@ -326,11 +304,9 @@ class _ActionButton extends StatelessWidget {
           foregroundColor: foregroundColor,
           disabledBackgroundColor: backgroundColor.withValues(alpha: 0.4),
           padding: const EdgeInsets.symmetric(horizontal: 8),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
-        icon: Icon(icon, size: 16),
+        icon: iconWidget ?? Icon(icon, size: 16),
         label: Text(
           label,
           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),

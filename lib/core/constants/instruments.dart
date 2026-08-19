@@ -18,6 +18,6 @@ abstract final class VallenatoInstruments {
     'Saxofonista',
     'Trombón',
     'Requintista',
-    'Sonido',
+    
   ];
 }
