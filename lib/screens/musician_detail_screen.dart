@@ -4,15 +4,19 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/theme/app_theme.dart';
+import '../core/utils/video_thumbnail.dart';
 import '../models/musician.dart';
-import '../models/musician_photo.dart';
+import '../models/musician_video.dart';
 import '../repositories/musician_repository.dart';
+import 'in_app_video_player_screen.dart';
 import 'photo_viewer_screen.dart';
 import 'widgets/dashboard/genre_badge.dart';
 
 /// Full-screen profile a contratante sees after tapping a [MusicianCard]:
-/// every directory fact plus the musician's live-performance photo
-/// portfolio, so organizers can judge the musician's work before reaching out.
+/// every directory fact plus the musician's photo/video portfolio, so
+/// organizers can judge the musician's work before reaching out. `photos`/
+/// `videos` are already part of [musician] (loaded with the rest of the
+/// directory row) — nothing extra to fetch here.
 class MusicianDetailScreen extends StatefulWidget {
   const MusicianDetailScreen({super.key, required this.musician});
 
@@ -25,27 +29,15 @@ class MusicianDetailScreen extends StatefulWidget {
 class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
   final MusicianRepository _repository = MusicianRepository();
 
-  List<MusicianPhoto> _photos = const [];
-  bool _loadingPhotos = true;
+  /// Local, mutable copy of [Musician.videos] so a view count can bump in
+  /// place the instant playback starts, without needing to refetch the
+  /// whole profile.
+  late List<MusicianVideo> _videos;
 
   @override
   void initState() {
     super.initState();
-    _loadPhotos();
-  }
-
-  Future<void> _loadPhotos() async {
-    try {
-      final photos = await _repository.fetchPhotos(widget.musician.id);
-      if (!mounted) return;
-      setState(() {
-        _photos = photos;
-        _loadingPhotos = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _loadingPhotos = false);
-    }
+    _videos = List<MusicianVideo>.from(widget.musician.videos);
   }
 
   Future<void> _contact({required bool isWhatsApp}) async {
@@ -61,12 +53,41 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
     );
   }
 
-  void _openPhoto(MusicianPhoto photo) {
+  void _openPhoto(String url) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => PhotoViewerScreen(imageUrl: url)));
+  }
+
+  void _openVideo(MusicianVideo video) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => PhotoViewerScreen(imageUrl: photo.imageUrl),
+        builder: (_) => InAppVideoPlayerScreen(
+          videoUrl: video.videoUrl,
+          onViewed: () => _onVideoViewed(video),
+        ),
       ),
     );
+  }
+
+  /// Bumps the local counter immediately (so the badge updates the instant
+  /// playback starts), then fires [MusicianRepository.incrementVideoView]
+  /// asynchronously and silently — a failed view count is never worth
+  /// interrupting or blocking playback for.
+  Future<void> _onVideoViewed(MusicianVideo video) async {
+    setState(() {
+      _videos = _videos
+          .map(
+            (v) =>
+                v.id == video.id ? v.copyWith(viewsCount: v.viewsCount + 1) : v,
+          )
+          .toList();
+    });
+    try {
+      await _repository.incrementVideoView(video.id);
+    } catch (_) {
+      // Silent by design — see doc comment above.
+    }
   }
 
   @override
@@ -249,6 +270,17 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
             ),
             const SizedBox(height: 12),
             _buildGallery(theme, extension),
+            if (_videos.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              Text(
+                'Videos',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildVideos(),
+            ],
           ],
         ),
       ),
@@ -256,16 +288,9 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
   }
 
   Widget _buildGallery(ThemeData theme, AppThemeExtension? extension) {
-    if (_loadingPhotos) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(
-          child: CircularProgressIndicator(color: AppColors.accent),
-        ),
-      );
-    }
+    final photos = widget.musician.photos;
 
-    if (_photos.isEmpty) {
+    if (photos.isEmpty) {
       return Text(
         'Este músico aún no agregó fotos a su portafolio.',
         style: theme.textTheme.bodyMedium?.copyWith(
@@ -277,26 +302,136 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: _photos.length,
+      itemCount: photos.length,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
       ),
       itemBuilder: (context, index) {
-        final photo = _photos[index];
+        final url = photos[index];
         return ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: InkWell(
-            onTap: () => _openPhoto(photo),
+            onTap: () => _openPhoto(url),
             child: Image.network(
-              photo.imageUrl,
+              url,
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) => Container(
                 color: Colors.black12,
                 alignment: Alignment.center,
                 child: const Icon(Icons.broken_image_outlined),
               ),
+              loadingBuilder: (context, child, progress) {
+                if (progress == null) return child;
+                return Container(
+                  color: Colors.black12,
+                  alignment: Alignment.center,
+                  child: const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildVideos() {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: _videos.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+      ),
+      itemBuilder: (context, index) {
+        final video = _videos[index];
+        // Only resolves for legacy YouTube links carried over from before
+        // videos became uploaded files — new uploads show the generic
+        // placeholder below instead (see MediaManagerCard's `_VideoTile`
+        // doc comment for why real thumbnail generation is out of scope).
+        final thumbnail = youtubeThumbnail(video.videoUrl);
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            onTap: () => _openVideo(video),
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: thumbnail != null
+                      ? Image.network(
+                          thumbnail,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              Container(color: Colors.black87),
+                          loadingBuilder: (context, child, progress) {
+                            if (progress == null) return child;
+                            return Container(
+                              color: Colors.black87,
+                              alignment: Alignment.center,
+                              child: const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white54,
+                                ),
+                              ),
+                            );
+                          },
+                        )
+                      : Container(color: Colors.black87),
+                ),
+                const Positioned.fill(
+                  child: Center(
+                    child: Icon(
+                      Icons.play_circle_fill_rounded,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  bottom: 4,
+                  left: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.visibility_outlined,
+                          size: 12,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          '${video.viewsCount}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         );

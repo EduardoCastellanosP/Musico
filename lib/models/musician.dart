@@ -1,4 +1,6 @@
+import '../core/constants/media_limits.dart';
 import '../core/constants/services.dart';
+import 'musician_video.dart';
 
 /// Domain model for a row in the Supabase `profiles` table.
 ///
@@ -27,6 +29,8 @@ class Musician {
     required this.availabilityNote,
     required this.coverageCities,
     required this.busyUntil,
+    required this.photos,
+    required this.videos,
   });
 
   factory Musician.fromJson(Map<String, dynamic> json) {
@@ -54,12 +58,29 @@ class Musician {
       busyUntil: json['busy_until'] != null
           ? DateTime.tryParse(json['busy_until'] as String)
           : null,
+      photos: _stringList(json['photos']),
+      videos: _videoList(json['musician_videos']),
     );
   }
 
   static List<String> _stringList(dynamic value) =>
       (value as List<dynamic>?)?.map((item) => item as String).toList() ??
       const [];
+
+  /// Parses the `musician_videos` resource PostgREST embeds alongside each
+  /// `profiles` row (see `MusicianRepository`'s `select('*, musician_videos(...))')`
+  /// calls), oldest first — trivial to sort client-side given the cap of 3.
+  static List<MusicianVideo> _videoList(dynamic value) {
+    final videos =
+        (value as List<dynamic>?)
+            ?.map(
+              (item) => MusicianVideo.fromJson(item as Map<String, dynamic>),
+            )
+            .toList() ??
+        <MusicianVideo>[];
+    videos.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return videos;
+  }
 
   final String id;
   final String fullName;
@@ -89,7 +110,7 @@ class Musician {
   /// technical [services].
   final List<String> genres;
 
-  /// Services offered — e.g. "Músico", "Sonido", "Ensayadero". A profile can
+  /// Services offered — e.g. "Músico", "Sonido", "Ensayaderos". A profile can
   /// offer more than one at once.
   final List<String> services;
 
@@ -109,6 +130,19 @@ class Musician {
   /// Scheduled end of the current "ocupado" window, used by the dashboard's
   /// auto check-out assistant. Null while free or when no limit was set.
   final DateTime? busyUntil;
+
+  /// Public portfolio photo URLs (`musician-photos` Storage bucket), newest
+  /// first. Capped at [MediaLimits.maxPhotos] by a DB constraint.
+  final List<String> photos;
+
+  /// Video portfolio (`musician_videos` table + `musician-videos` Storage
+  /// bucket), each with its own view counter. Capped at
+  /// [MediaLimits.maxVideos] by a DB trigger.
+  final List<MusicianVideo> videos;
+
+  bool get canAddMorePhotos => photos.length < MediaLimits.maxPhotos;
+
+  bool get canAddMoreVideos => videos.length < MediaLimits.maxVideos;
 
   bool get offersMusicianService =>
       services.contains(MusicianServices.musician);
@@ -133,6 +167,8 @@ class Musician {
     String? availableTo,
     DateTime? busyUntil,
     bool clearBusyUntil = false,
+    List<String>? photos,
+    List<MusicianVideo>? videos,
   }) {
     return Musician(
       id: id,
@@ -154,6 +190,8 @@ class Musician {
       availabilityNote: availabilityNote ?? this.availabilityNote,
       coverageCities: coverageCities ?? this.coverageCities,
       busyUntil: clearBusyUntil ? null : (busyUntil ?? this.busyUntil),
+      photos: photos ?? this.photos,
+      videos: videos ?? this.videos,
     );
   }
 

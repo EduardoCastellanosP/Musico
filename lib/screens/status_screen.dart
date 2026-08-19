@@ -2,17 +2,19 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:video_compress/video_compress.dart';
 
 import '../core/constants/services.dart';
 import '../core/theme/app_theme.dart';
 import '../models/musician.dart';
-import '../models/musician_photo.dart';
 import '../models/musician_stats.dart';
+import '../models/musician_video.dart';
 import '../repositories/musician_repository.dart';
+import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 import 'widgets/status/availability_time_card.dart';
 import 'widgets/status/coverage_cities_card.dart';
-import 'widgets/status/gallery_card.dart';
+import 'widgets/status/media_manager_card.dart';
 import 'widgets/status/message_field_card.dart';
 import 'widgets/status/musician_skills_card.dart';
 import 'widgets/status/profile_avatar_editor.dart';
@@ -35,12 +37,12 @@ class StatusScreen extends StatefulWidget {
 class _StatusScreenState extends State<StatusScreen>
     with WidgetsBindingObserver {
   final MusicianRepository _repository = MusicianRepository();
+  final AuthService _authService = AuthService();
   final ImagePicker _imagePicker = ImagePicker();
   final TextEditingController _messageController = TextEditingController();
   final TextEditingController _fullNameController = TextEditingController();
   final TextEditingController _cityController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
-  final TextEditingController _coverageCityController = TextEditingController();
   final TextEditingController _availabilityNoteController =
       TextEditingController();
   final TextEditingController _serviceDescriptionController =
@@ -48,7 +50,8 @@ class _StatusScreenState extends State<StatusScreen>
 
   Musician? _profile;
   MusicianStats _stats = MusicianStats.zero;
-  List<MusicianPhoto> _photos = const [];
+  List<String> _photos = [];
+  List<MusicianVideo> _videos = [];
   List<String> _coverageCities = [];
   TimeOfDay _availableFrom = const TimeOfDay(hour: 8, minute: 0);
   TimeOfDay _availableTo = const TimeOfDay(hour: 22, minute: 0);
@@ -59,7 +62,9 @@ class _StatusScreenState extends State<StatusScreen>
   bool _loading = true;
   bool _saving = false;
   bool _uploadingPhoto = false;
+  bool _uploadingVideo = false;
   bool _uploadingAvatar = false;
+  bool _deletingAccount = false;
 
   bool get _isMusician => _selectedServices.contains(MusicianServices.musician);
 
@@ -80,7 +85,6 @@ class _StatusScreenState extends State<StatusScreen>
     _fullNameController.dispose();
     _cityController.dispose();
     _phoneController.dispose();
-    _coverageCityController.dispose();
     _availabilityNoteController.dispose();
     _serviceDescriptionController.dispose();
     super.dispose();
@@ -104,18 +108,14 @@ class _StatusScreenState extends State<StatusScreen>
       return;
     }
 
-    final results = await Future.wait([
-      _repository.fetchContactStats(profile.id),
-      _repository.fetchPhotos(profile.id),
-    ]);
-    final stats = results[0] as MusicianStats;
-    final photos = results[1] as List<MusicianPhoto>;
+    final stats = await _repository.fetchContactStats(profile.id);
 
     if (!mounted) return;
     setState(() {
       _profile = profile;
       _stats = stats;
-      _photos = photos;
+      _photos = List<String>.from(profile.photos);
+      _videos = List<MusicianVideo>.from(profile.videos);
       _isFree = profile.isFree;
       _messageController.text = profile.statusMessage;
       _fullNameController.text = profile.fullName;
@@ -171,15 +171,14 @@ class _StatusScreenState extends State<StatusScreen>
     });
   }
 
-  void _addCoverageCity() {
-    final value = _coverageCityController.text.trim();
+  void _addCoverageCity(String city) {
+    final value = city.trim();
     if (value.isEmpty) return;
     final alreadyCovered =
         _coverageCities.any(
-          (city) => city.toLowerCase() == value.toLowerCase(),
+          (covered) => covered.toLowerCase() == value.toLowerCase(),
         ) ||
         value.toLowerCase() == _cityController.text.trim().toLowerCase();
-    _coverageCityController.clear();
     if (alreadyCovered) return;
     setState(() => _coverageCities = [..._coverageCities, value]);
   }
@@ -228,12 +227,12 @@ class _StatusScreenState extends State<StatusScreen>
       final fileExt = picked.path.contains('.')
           ? picked.path.split('.').last
           : 'jpg';
-      final photo = await _repository.uploadPhoto(
+      final photoUrl = await _repository.addPhoto(
         bytes: bytes,
         fileExt: fileExt.toLowerCase(),
       );
       if (!mounted) return;
-      setState(() => _photos = [photo, ..._photos]);
+      setState(() => _photos = [..._photos, photoUrl]);
     } catch (_) {
       if (!mounted) return;
       _showMessage('No pudimos subir la foto. Intenta de nuevo.');
@@ -274,7 +273,7 @@ class _StatusScreenState extends State<StatusScreen>
     }
   }
 
-  Future<void> _deletePhoto(MusicianPhoto photo) async {
+  Future<void> _removePhoto(String url) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -295,12 +294,146 @@ class _StatusScreenState extends State<StatusScreen>
     if (confirmed != true) return;
 
     try {
-      await _repository.deletePhoto(photo);
+      await _repository.removePhoto(url);
       if (!mounted) return;
-      setState(() => _photos = _photos.where((p) => p.id != photo.id).toList());
+      setState(() => _photos = _photos.where((p) => p != url).toList());
     } catch (_) {
       if (!mounted) return;
       _showMessage('No pudimos eliminar la foto. Intenta de nuevo.');
+    }
+  }
+
+  /// Picks a local video, compresses it on-device (`video_compress`), then
+  /// uploads the compressed file — mirrors [_addPhoto]'s pick/upload shape,
+  /// with a compression pass in between. `VideoCompress.deleteAllCache()`
+  /// in `finally` keeps the compressed temp file from lingering on disk
+  /// after the upload finishes (success or not).
+  Future<void> _addVideo() async {
+    final XFile? picked = await _imagePicker.pickVideo(
+      source: ImageSource.gallery,
+    );
+    if (picked == null) return;
+
+    // --- NUEVO: Validar duración máxima de 60 segundos ---
+    try {
+      final info = await VideoCompress.getMediaInfo(picked.path);
+      final durationInSeconds = (info.duration ?? 0) / 1000;
+      
+      if (durationInSeconds > 60) {
+        _showMessage('El video es muy largo. Tiene que ser de máximo 60 segundos.');
+        return;
+      }
+    } catch (_) {
+      // Si por alguna razón no se puede leer la info, dejamos continuar o manejamos el error
+    }
+    // ----------------------------------------------------
+
+    setState(() => _uploadingVideo = true);
+    try {
+      final info = await VideoCompress.compressVideo(
+        picked.path,
+        quality: VideoQuality.MediumQuality,
+        deleteOrigin: false,
+      );
+      final compressedFile = info?.file;
+      if (compressedFile == null) {
+        throw StateError('No pudimos comprimir el video.');
+      }
+
+      final bytes = await compressedFile.readAsBytes();
+      final fileExt = picked.path.contains('.')
+          ? picked.path.split('.').last
+          : 'mp4';
+      final video = await _repository.addVideo(
+        bytes: bytes,
+        fileExt: fileExt.toLowerCase(),
+      );
+      if (!mounted) return;
+      setState(() => _videos = [..._videos, video]);
+    } catch (_) {
+      if (!mounted) return;
+      _showMessage('No pudimos agregar el video. Intenta de nuevo.');
+    } finally {
+      await VideoCompress.deleteAllCache();
+      if (mounted) setState(() => _uploadingVideo = false);
+    }
+  }
+
+  Future<void> _removeVideo(MusicianVideo video) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('¿Eliminar video?'),
+        content: const Text('Esta acción no se puede deshacer.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Eliminar', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _repository.removeVideo(video);
+      if (!mounted) return;
+      setState(() => _videos = _videos.where((v) => v.id != video.id).toList());
+    } catch (_) {
+      if (!mounted) return;
+      _showMessage('No pudimos eliminar el video. Intenta de nuevo.');
+    }
+  }
+
+  /// "Eliminar cuenta": confirms via [AlertDialog], then wipes Storage
+  /// files, the `auth.users` row (which cascades to every related table —
+  /// see [MusicianRepository.deleteAccount]) and finally the local session.
+  /// No manual navigation to [LoginScreen] is needed: [AuthGate] reacts to
+  /// the auth-state change and swaps screens on its own.
+  Future<void> _confirmDeleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('¿Eliminar tu cuenta?'),
+        content: const Text(
+          'Esta acción es irreversible: se borrarán tu perfil, tu galería '
+          'de fotos y todo tu historial de contactos de forma permanente.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text(
+              'Eliminar',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _deletingAccount = true);
+    try {
+      await _repository.deleteAccount();
+      try {
+        await _authService.signOut();
+      } catch (_) {
+        // The account is already gone server-side either way; a failed
+        // remote sign-out call doesn't stop the local session from having
+        // been cleared, which is what AuthGate reacts to.
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _deletingAccount = false);
+      _showMessage('No pudimos eliminar tu cuenta. Intenta de nuevo.');
     }
   }
 
@@ -455,10 +588,23 @@ class _StatusScreenState extends State<StatusScreen>
                     ],
                   ),
                   Text(
-                    'Mi Estado',
+                    'Perfil de ${_profile!.fullName}',
                     style: theme.textTheme.headlineMedium?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
+                  ),
+
+                  const SizedBox(height: 16),
+                  ProfileAvatarEditor(
+                    musician: _profile!,
+                    uploading: _uploadingAvatar,
+                    onTap: _updateProfilePicture,
+                  ),
+                  const SizedBox(height: 16),
+                  ProfileInfoCard(
+                    fullNameController: _fullNameController,
+                    cityController: _cityController,
+                    phoneController: _phoneController,
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -481,20 +627,9 @@ class _StatusScreenState extends State<StatusScreen>
                     onPickFrom: () => _pickTime(isFrom: true),
                     onPickTo: () => _pickTime(isFrom: false),
                   ),
+
                   const SizedBox(height: 16),
                   MessageFieldCard(controller: _messageController),
-                  const SizedBox(height: 16),
-                  ProfileAvatarEditor(
-                    musician: _profile!,
-                    uploading: _uploadingAvatar,
-                    onTap: _updateProfilePicture,
-                  ),
-                  const SizedBox(height: 16),
-                  ProfileInfoCard(
-                    fullNameController: _fullNameController,
-                    cityController: _cityController,
-                    phoneController: _phoneController,
-                  ),
                   if (_isMusician) ...[
                     const SizedBox(height: 16),
                     MusicianSkillsCard(
@@ -521,16 +656,19 @@ class _StatusScreenState extends State<StatusScreen>
                   const SizedBox(height: 16),
                   CoverageCitiesCard(
                     cities: _coverageCities,
-                    inputController: _coverageCityController,
-                    onAdd: _addCoverageCity,
+                    onAddCity: _addCoverageCity,
                     onRemove: _removeCoverageCity,
                   ),
                   const SizedBox(height: 16),
-                  GalleryCard(
+                  MediaManagerCard(
                     photos: _photos,
-                    uploading: _uploadingPhoto,
+                    videos: _videos,
+                    uploadingPhoto: _uploadingPhoto,
+                    uploadingVideo: _uploadingVideo,
                     onAddPhoto: _addPhoto,
-                    onDeletePhoto: _deletePhoto,
+                    onRemovePhoto: _removePhoto,
+                    onAddVideo: _addVideo,
+                    onRemoveVideo: _removeVideo,
                   ),
                   const SizedBox(height: 28),
                   Text(
@@ -541,6 +679,49 @@ class _StatusScreenState extends State<StatusScreen>
                   ),
                   const SizedBox(height: 12),
                   StatsPanel(stats: _stats, rating: _profile!.rating),
+                  const SizedBox(height: 28),
+                  Text(
+                    'Zona de peligro',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: Colors.red,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Esta acción no se puede deshacer.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: extension?.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _deletingAccount
+                          ? null
+                          : _confirmDeleteAccount,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                      icon: _deletingAccount
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: Colors.red,
+                              ),
+                            )
+                          : const Icon(Icons.delete_forever_rounded),
+                      label: const Text(
+                        'Eliminar cuenta',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
                 ],
               ),
       ),

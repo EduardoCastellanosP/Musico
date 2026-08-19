@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
+import 'city_picker_sheet.dart';
 
 /// Editable list of extra municipalities the musician travels to, beyond
 /// their base city — feeds `profiles.coverage_cities` and the dashboard's
@@ -9,14 +10,12 @@ class CoverageCitiesCard extends StatelessWidget {
   const CoverageCitiesCard({
     super.key,
     required this.cities,
-    required this.inputController,
-    required this.onAdd,
+    required this.onAddCity,
     required this.onRemove,
   });
 
   final List<String> cities;
-  final TextEditingController inputController;
-  final VoidCallback onAdd;
+  final ValueChanged<String> onAddCity;
   final ValueChanged<String> onRemove;
 
   @override
@@ -49,31 +48,42 @@ class CoverageCitiesCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: inputController,
-                  textCapitalization: TextCapitalization.words,
-                  onSubmitted: (_) => onAdd(),
-                  style: theme.textTheme.bodyLarge,
-                  decoration: const InputDecoration(
-                    hintText: 'Ej: Floridablanca',
-                    prefixIcon: Icon(Icons.add_location_alt_outlined),
+          InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () async {
+              final selected = await showCityPickerSheet(
+                context,
+                title: 'Agregar municipio de cobertura',
+              );
+              if (selected != null) onAddCity(selected);
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              decoration: BoxDecoration(
+                color: extension?.inputFill,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: AppColors.profileAccent.withValues(alpha: 0.4),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.add_location_alt_outlined,
+                    color: AppColors.profileAccent,
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Agregar municipio',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.profileAccent,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              IconButton.filled(
-                onPressed: onAdd,
-                style: IconButton.styleFrom(
-                  backgroundColor: AppColors.profileAccent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.all(14),
-                ),
-                icon: const Icon(Icons.add_rounded),
-              ),
-            ],
+            ),
           ),
           if (cities.isEmpty) ...[
             const SizedBox(height: 10),

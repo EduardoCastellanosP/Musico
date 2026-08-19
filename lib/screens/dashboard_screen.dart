@@ -182,6 +182,36 @@ class _DashboardScreenState extends State<DashboardScreen>
     _loadMusicians();
   }
 
+  /// Dashboard header's quick availability switch. Flips `_currentProfile`
+  /// immediately (optimistic UI) before the network call even starts; if
+  /// [MusicianRepository.setAvailability] throws, the flip is rolled back
+  /// and the user is told via a [SnackBar].
+  Future<void> _onAvailabilityChanged(bool isFree) async {
+    final previousProfile = _currentProfile;
+    if (previousProfile == null) return;
+
+    setState(() {
+      _currentProfile = previousProfile.copyWith(
+        isFree: isFree,
+        clearBusyUntil: isFree,
+      );
+    });
+
+    try {
+      await _repository.setAvailability(isFree);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _currentProfile = previousProfile);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('No pudimos actualizar tu disponibilidad.'),
+          ),
+        );
+    }
+  }
+
   Future<void> _openStatusScreen() async {
     await Navigator.of(
       context,
@@ -191,16 +221,32 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _contact(Musician musician, {required bool isWhatsApp}) async {
-    final uri = isWhatsApp ? musician.whatsappUri : musician.callUri;
-    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!launched) return;
-    unawaited(
-      _repository.logContactEvent(
-        musicianId: musician.id,
-        contactType: isWhatsApp ? 'whatsapp' : 'call',
-      ),
-    );
+  final Uri uri;
+  
+  if (isWhatsApp) {
+    // 1. Limpiamos el número para asegurar que solo queden dígitos
+    final cleanPhone = musician.phone.replaceAll(RegExp(r'\D'), '');
+    
+    // 2. Creamos el mensaje con la mención a MUSSY
+    final message = '¡Hola ${musician.fullName}! Vi tu perfil y número de contacto en la app de MUSSY y me interesan tus servicios.';
+    
+    // 3. Construimos la URI con el texto codificado
+    uri = Uri.parse('https://wa.me/$cleanPhone?text=${Uri.encodeComponent(message)}');
+  } else {
+    // Si es llamada normal, mantiene su comportamiento habitual
+    uri = musician.callUri;
   }
+
+  final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  if (!launched) return;
+
+  unawaited(
+    _repository.logContactEvent(
+      musicianId: musician.id,
+      contactType: isWhatsApp ? 'whatsapp' : 'call',
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -218,6 +264,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                   greetingName: _currentProfile?.fullName,
                   availableCount: _availableCount,
                   onSettingsTap: _openStatusScreen,
+                  isFree: _currentProfile?.isFree ?? true,
+                  onAvailabilityChanged: _onAvailabilityChanged,
                 ),
               ),
               const SliverToBoxAdapter(child: SizedBox(height: 18)),

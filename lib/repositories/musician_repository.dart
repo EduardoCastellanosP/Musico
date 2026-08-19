@@ -2,12 +2,20 @@ import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/constants/city_zones.dart';
 import '../models/musician.dart';
-import '../models/musician_photo.dart';
 import '../models/musician_stats.dart';
+import '../models/musician_video.dart';
 
 const String _photosBucket = 'musician-photos';
 const String _avatarsBucket = 'avatars';
+const String _videosBucket = 'musician-videos';
+
+/// Columns pulled for the `musician_videos` resource PostgREST embeds
+/// alongside every `profiles` row — shared by [fetchMusicians] and
+/// [fetchCurrentProfile] so the two selects can't drift out of sync.
+const String _videoColumns =
+    'id, musician_id, video_url, views_count, created_at';
 
 /// Every read/write the app performs against the `profiles` and
 /// `contact_events` tables goes through here — UI widgets never touch the
@@ -33,6 +41,13 @@ class MusicianRepository {
   /// it's one of their [Musician.coverageCities] (they travel there). Set
   /// [searchNationwide] to `true` (the dashboard's "Toda Colombia" switch)
   /// to drop that filter and search the whole country.
+  ///
+  /// [nearCity] is also widened to every city in the same [CityZones]
+  /// cluster before filtering, so a musician based in a commuter town (e.g.
+  /// Lebrija) still shows up for a contractor searching from the anchor city
+  /// (Bucaramanga) even if they never explicitly listed it in their
+  /// coverage — see [CityZones] for why this is a static table instead of a
+  /// geocoding API call.
   Future<List<Musician>> fetchMusicians({
     String? instrument,
     String? genre,
@@ -66,14 +81,25 @@ class MusicianRepository {
 
     final city = nearCity?.trim();
     if (!searchNationwide && city != null && city.isNotEmpty) {
-      // PostgREST `.or()` syntax: an inline comma-separated list of
-      // `column.operator.value` clauses, OR-ed together. `cs` (contains)
-      // needs the value as a Postgres array literal — `{"City"}` — quoted
-      // so city names with spaces (e.g. "Santa Marta") parse as one element.
-      query = query.or('city.eq.$city,coverage_cities.cs.{"$city"}');
+      // Dual coverage criterion, widened to the whole metro zone: match
+      // either a base `city` that's IN the zone (`city.in.(...)`) or a
+      // `coverage_cities` array that overlaps it at all (`coverage_cities
+      // .ov.{...}`, Postgres `&&`) — either is enough to surface the
+      // musician. `CityZones.expand` returns `[city]` unchanged for any
+      // city outside the curated table, so this is a strict superset of the
+      // previous single-city `.eq`/`.cs` filter, never a narrowing.
+      final zoneCities = CityZones.expand(city);
+      final cityList = zoneCities.map((c) => '"$c"').join(',');
+      query = query.or('city.in.($cityList),coverage_cities.ov.{$cityList}');
     }
 
+    // `.select()` here (after every filter is already applied) is what
+    // adds the `musician_videos` embed to the response — PostgREST embeds
+    // work the same way on a `setof profiles`-returning RPC as on a plain
+    // table select, but the postgrest-dart type system only exposes
+    // `.select()` at this transform stage, after filtering is done.
     final rows = await query
+        .select('*, musician_videos($_videoColumns)')
         .order('is_free', ascending: false)
         .order('rating', ascending: false);
 
@@ -88,7 +114,7 @@ class MusicianRepository {
 
     final row = await _client
         .from('profiles')
-        .select()
+        .select('*, musician_videos($_videoColumns)')
         .eq('id', uid)
         .maybeSingle();
     if (row == null) return null;
@@ -158,15 +184,22 @@ class MusicianRepository {
         .eq('id', uid);
   }
 
-  /// Confirms the auto check-out prompt: the musician's gig ended, so they
-  /// go back to free and the scheduled cutoff is cleared.
-  Future<void> markAsFree() async {
+  /// Quick optimistic toggle for the dashboard header's availability switch
+  /// — flips only `is_free`. Turning it on also clears any stale
+  /// `busy_until` so the auto check-out assistant doesn't immediately
+  /// re-fire; turning it off leaves `busy_until` untouched (picking an exact
+  /// return time is still done from "Mi Estado").
+  Future<void> setAvailability(bool isFree) async {
     final uid = _requireUserId();
     await _client
         .from('profiles')
-        .update({'is_free': true, 'busy_until': null})
+        .update({'is_free': isFree, if (isFree) 'busy_until': null})
         .eq('id', uid);
   }
+
+  /// Confirms the auto check-out prompt: the musician's gig ended, so they
+  /// go back to free and the scheduled cutoff is cleared.
+  Future<void> markAsFree() => setAvailability(true);
 
   /// Dismisses the auto check-out prompt with "sigo ocupado": pushes
   /// `busy_until` forward by [extra] so the prompt doesn't re-fire right away.
@@ -225,20 +258,15 @@ class MusicianRepository {
     });
   }
 
-  /// A musician's live-performance photo portfolio, newest first.
-  Future<List<MusicianPhoto>> fetchPhotos(String musicianId) async {
-    final rows = await _client
-        .from('musician_photos')
-        .select()
-        .eq('musician_id', musicianId)
-        .order('created_at', ascending: false);
-    return rows.map(MusicianPhoto.fromJson).toList();
-  }
-
   /// Uploads [bytes] to the `musician-photos` bucket under the logged-in
-  /// musician's own folder (storage policies key off that prefix), then
-  /// records the public URL in `musician_photos`.
-  Future<MusicianPhoto> uploadPhoto({
+  /// musician's own folder, then appends the resulting public URL to their
+  /// `profiles.photos` array via the `add_profile_photo` RPC (see
+  /// `supabase/schema.sql`). That RPC does an atomic `array_append` rather
+  /// than a plain `.update()` read-modify-write, which is what lets the
+  /// DB-side `profiles_photos_max_10` CHECK hold even under concurrent
+  /// edits from two devices — the [MediaLimits.maxPhotos] check on the UI
+  /// side is only the fast, friendly rejection, not the real guardrail.
+  Future<String> addPhoto({
     required Uint8List bytes,
     required String fileExt,
   }) async {
@@ -253,14 +281,77 @@ class MusicianRepository {
           bytes,
           fileOptions: const FileOptions(upsert: false),
         );
-    final imageUrl = _client.storage.from(_photosBucket).getPublicUrl(path);
+    final photoUrl = _client.storage.from(_photosBucket).getPublicUrl(path);
+
+    await _client.rpc('add_profile_photo', params: {'photo_url': photoUrl});
+    return photoUrl;
+  }
+
+  /// Removes both the storage object and the URL's entry in
+  /// `profiles.photos`.
+  Future<void> removePhoto(String photoUrl) async {
+    _requireUserId();
+    const marker = '$_photosBucket/';
+    final markerIndex = photoUrl.indexOf(marker);
+    if (markerIndex != -1) {
+      final path = photoUrl.substring(markerIndex + marker.length);
+      await _client.storage.from(_photosBucket).remove([path]);
+    }
+    await _client.rpc('remove_profile_photo', params: {'photo_url': photoUrl});
+  }
+
+  /// Uploads [bytes] — already compressed on-device via `video_compress` by
+  /// the caller — to the `musician-videos` bucket, then inserts the
+  /// resulting public URL as a new `musician_videos` row. The per-musician
+  /// cap ([MediaLimits.maxVideos]) is enforced by the
+  /// `musician_videos_max_3` trigger, which surfaces as a thrown
+  /// [PostgrestException] if the UI's own check was somehow bypassed (e.g.
+  /// a race between two devices).
+  Future<MusicianVideo> addVideo({
+    required Uint8List bytes,
+    required String fileExt,
+  }) async {
+    final uid = _requireUserId();
+    final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
+    final path = '$uid/$fileName';
+
+    await _client.storage
+        .from(_videosBucket)
+        .uploadBinary(
+          path,
+          bytes,
+          fileOptions: const FileOptions(upsert: false),
+        );
+    final videoUrl = _client.storage.from(_videosBucket).getPublicUrl(path);
 
     final row = await _client
-        .from('musician_photos')
-        .insert({'musician_id': uid, 'image_url': imageUrl})
+        .from('musician_videos')
+        .insert({'musician_id': uid, 'video_url': videoUrl})
         .select()
         .single();
-    return MusicianPhoto.fromJson(row);
+    return MusicianVideo.fromJson(row);
+  }
+
+  /// Removes both the storage object and its `musician_videos` row.
+  Future<void> removeVideo(MusicianVideo video) async {
+    _requireUserId();
+    const marker = '$_videosBucket/';
+    final markerIndex = video.videoUrl.indexOf(marker);
+    if (markerIndex != -1) {
+      final path = video.videoUrl.substring(markerIndex + marker.length);
+      await _client.storage.from(_videosBucket).remove([path]);
+    }
+    await _client.from('musician_videos').delete().eq('id', video.id);
+  }
+
+  /// Fire-and-forget view increment for [videoId] — `increment_video_view`
+  /// (see `supabase/schema.sql`) is the only path allowed to touch
+  /// `views_count`, and it silently no-ops if this same viewer already
+  /// counted a view for this video in the last 30 minutes. Errors are the
+  /// caller's to decide whether to swallow; a missed view is never worth
+  /// interrupting playback for.
+  Future<void> incrementVideoView(String videoId) {
+    return _client.rpc('increment_video_view', params: {'video_id': videoId});
   }
 
   /// Uploads [bytes] to the `avatars` bucket under a filename unique to the
@@ -291,16 +382,51 @@ class MusicianRepository {
     return avatarUrl;
   }
 
-  /// Removes both the storage object and its `musician_photos` row.
-  Future<void> deletePhoto(MusicianPhoto photo) async {
-    _requireUserId();
-    const marker = '$_photosBucket/';
-    final markerIndex = photo.imageUrl.indexOf(marker);
-    if (markerIndex != -1) {
-      final path = photo.imageUrl.substring(markerIndex + marker.length);
-      await _client.storage.from(_photosBucket).remove([path]);
+  /// Permanently deletes the logged-in musician's account: their portfolio
+  /// and avatar files in Storage, then the `auth.users` row itself via the
+  /// `delete_own_account` Postgres function (see `supabase/schema.sql`).
+  ///
+  /// Storage objects live outside the database's foreign-key graph, so
+  /// cascading the `profiles` row would leave them orphaned — they're
+  /// removed explicitly, and *before* the auth row, while the session (and
+  /// therefore each bucket's owner-only policy) is still valid. Everything
+  /// else — `profiles`, `contact_events`, `musician_photos`,
+  /// `musician_videos` — is cleaned up automatically by the
+  /// `on delete cascade` already set up on those tables once the
+  /// `auth.users` row is gone.
+  Future<void> deleteAccount() async {
+    final uid = _requireUserId();
+
+    await _deleteAllUnderPrefix(_photosBucket, uid);
+    await _deleteAllUnderPrefix(_avatarsBucket, uid);
+    await _deleteAllUnderPrefix(_videosBucket, uid);
+
+    // Two independent deletion paths, tried in order. `delete_own_account`
+    // (Postgres RPC) is preferred — nothing to deploy beyond schema.sql —
+    // but some Supabase projects lock direct `auth.users` writes down
+    // tighter than a `security definer` function owned by `postgres` can
+    // get around (see that function's comment in supabase/schema.sql for
+    // why). When the RPC fails for any reason, fall back to the
+    // `delete-account` Edge Function, which uses the Auth Admin API and so
+    // always has the rights needed regardless of table-level grants.
+    try {
+      await _client.rpc('delete_own_account');
+    } catch (rpcError) {
+      try {
+        await _client.functions.invoke('delete-account');
+      } catch (_) {
+        // Surface the original RPC failure — it's tied to the primary,
+        // documented deletion path and is more actionable to debug.
+        throw rpcError;
+      }
     }
-    await _client.from('musician_photos').delete().eq('id', photo.id);
+  }
+
+  Future<void> _deleteAllUnderPrefix(String bucket, String uid) async {
+    final objects = await _client.storage.from(bucket).list(path: uid);
+    if (objects.isEmpty) return;
+    final paths = objects.map((object) => '$uid/${object.name}').toList();
+    await _client.storage.from(bucket).remove(paths);
   }
 
   String _requireUserId() {

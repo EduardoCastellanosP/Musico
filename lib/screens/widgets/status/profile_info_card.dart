@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../phone_input_field.dart';
+import 'city_picker_sheet.dart';
 
 /// Editable public identity fields — name, city and WhatsApp phone — the
 /// same data every other musician sees on this musician's dashboard card.
@@ -65,11 +66,22 @@ class ProfileInfoCard extends StatelessWidget {
           const SizedBox(height: 6),
           TextField(
             controller: cityController,
-            textCapitalization: TextCapitalization.words,
+            readOnly: true,
+            // Picking from `CityPickerSheet` instead of free-typing is what
+            // keeps `city` consistent enough for `CityZones`/"Cercanías"
+            // matching to actually work — see CityZones' doc comment.
+            onTap: () async {
+              final selected = await showCityPickerSheet(
+                context,
+                title: 'Elige tu ciudad principal',
+              );
+              if (selected != null) cityController.text = selected;
+            },
             style: theme.textTheme.bodyLarge,
             decoration: const InputDecoration(
               hintText: 'Ej: Valledupar',
               prefixIcon: Icon(Icons.location_on_outlined),
+              suffixIcon: Icon(Icons.expand_more_rounded),
             ),
           ),
           const SizedBox(height: 16),

@@ -380,14 +380,17 @@ class _SwitchOption extends StatelessWidget {
     final extension = theme.extension<AppThemeExtension>();
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4), // Margen ajustado para ganar espacio
+      padding: const EdgeInsets.symmetric(
+        horizontal: 4,
+      ), // Margen ajustado para ganar espacio
       child: Row(
         children: [
           Icon(icon, size: 14, color: extension?.textSecondary),
           const SizedBox(width: 4),
           Expanded(
             child: FittedBox(
-              fit: BoxFit.scaleDown, // <--- La clave: escala el texto si es muy largo para que NUNCA se corte
+              fit: BoxFit
+                  .scaleDown, // <--- La clave: escala el texto si es muy largo para que NUNCA se corte
               alignment: Alignment.centerLeft,
               child: Text(
                 label,
@@ -412,6 +415,7 @@ class _SwitchOption extends StatelessWidget {
     );
   }
 }
+
 class _FilterChip extends StatelessWidget {
   const _FilterChip({
     required this.label,

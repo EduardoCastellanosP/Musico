@@ -6,7 +6,7 @@ abstract final class MusicianServices {
   static const String musician = 'Músico';
 
   static const List<String> all = [
-    // musician,
+    musician,
     'Sonido',
     'Ensayaderos',
     'Iluminación',
@@ -20,7 +20,7 @@ abstract final class MusicianServices {
   /// alongside) instruments and genres.
   static const List<String> technical = [
     'Sonido',
-    'Ensayadero',
+    'Ensayaderos',
     'Iluminación',
     'Transporte',
     // 'Alquiler de equipos',

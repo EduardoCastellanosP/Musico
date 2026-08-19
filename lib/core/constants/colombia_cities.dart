@@ -1,0 +1,127 @@
+/// Curated list of Colombian departments and their most common
+/// municipalities, used to back the location picker in "Mi Estado" (base
+/// city and travel coverage) so profile locations come from a controlled
+/// vocabulary instead of free-typed text — the root cause behind
+/// [CityZones] needing to exist at all: typos/casing drift meant
+/// "Cercanías" matching could silently miss a musician.
+///
+/// Not exhaustive: Colombia has 1,100+ municipalities and hand-typing every
+/// one isn't a good use of an MVP's time. `CityPickerSheet` always offers
+/// "usar tal cual" for any town not listed here, so this is a strict
+/// improvement over free text, never a hard restriction — nobody gets
+/// blocked from registering because their town is missing.
+abstract final class ColombiaCities {
+  static const Map<String, List<String>> byDepartment = {
+    'Amazonas': ['Leticia', 'Puerto Nariño'],
+    'Antioquia': [
+      'Medellín',
+      'Bello',
+      'Itagüí',
+      'Envigado',
+      'Rionegro',
+      'Apartadó',
+      'Turbo',
+      'Sabaneta',
+      'Caucasia',
+      'Copacabana',
+    ],
+    'Arauca': ['Arauca', 'Tame', 'Saravena', 'Arauquita'],
+    'Atlántico': [
+      'Barranquilla',
+      'Soledad',
+      'Malambo',
+      'Sabanalarga',
+      'Puerto Colombia',
+    ],
+    'Bolívar': [
+      'Cartagena',
+      'Magangué',
+      'Turbaco',
+      'Arjona',
+      'El Carmen de Bolívar',
+    ],
+    'Boyacá': ['Tunja', 'Duitama', 'Sogamoso', 'Chiquinquirá', 'Paipa'],
+    'Caldas': ['Manizales', 'La Dorada', 'Chinchiná', 'Villamaría'],
+    'Caquetá': ['Florencia', 'San Vicente del Caguán', 'Puerto Rico'],
+    'Casanare': ['Yopal', 'Aguazul', 'Villanueva', 'Tauramena'],
+    'Cauca': ['Popayán', 'Santander de Quilichao', 'Puerto Tejada', 'Patía'],
+    'Cesar': [
+      'Valledupar',
+      'Aguachica',
+      'Codazzi',
+      'La Jagua de Ibirico',
+      'Bosconia',
+      'Curumaní',
+      'San Diego',
+      'La Paz',
+      'Chiriguaná',
+    ],
+    'Chocó': ['Quibdó', 'Istmina', 'Tadó'],
+    'Córdoba': ['Montería', 'Cereté', 'Lorica', 'Sahagún', 'Planeta Rica'],
+    'Cundinamarca': [
+      'Soacha',
+      'Zipaquirá',
+      'Facatativá',
+      'Chía',
+      'Girardot',
+      'Fusagasugá',
+      'Mosquera',
+      'Madrid',
+    ],
+    'Guainía': ['Inírida'],
+    'Guaviare': ['San José del Guaviare'],
+    'Huila': ['Neiva', 'Pitalito', 'Garzón', 'La Plata'],
+    'La Guajira': ['Riohacha', 'Maicao', 'Uribia', 'Fonseca', 'Villanueva'],
+    'Magdalena': ['Santa Marta', 'Ciénaga', 'Fundación', 'El Banco', 'Plato'],
+    'Meta': ['Villavicencio', 'Acacías', 'Granada', 'Puerto López'],
+    'Nariño': ['Pasto', 'Tumaco', 'Ipiales', 'Túquerres'],
+    'Norte de Santander': [
+      'Cúcuta',
+      'Ocaña',
+      'Pamplona',
+      'Villa del Rosario',
+      'Los Patios',
+    ],
+    'Putumayo': ['Mocoa', 'Puerto Asís', 'Orito'],
+    'Quindío': ['Armenia', 'Calarcá', 'La Tebaida', 'Montenegro'],
+    'Risaralda': ['Pereira', 'Dosquebradas', 'Santa Rosa de Cabal'],
+    'San Andrés y Providencia': ['San Andrés', 'Providencia'],
+    'Santander': [
+      'Bucaramanga',
+      'Floridablanca',
+      'Girón',
+      'Piedecuesta',
+      'Barrancabermeja',
+      'San Gil',
+      'Socorro',
+      'Málaga',
+      'Barbosa',
+      'Vélez',
+      'Lebrija',
+      'Rionegro',
+      'El Playón',
+      'Los Santos',
+      'Zapatoca',
+      'Puerto Wilches',
+      'Sabana de Torres',
+      'Cimitarra',
+      'Charalá',
+      'Landázuri',
+    ],
+    'Sucre': ['Sincelejo', 'Corozal', 'San Marcos', 'Sampués'],
+    'Tolima': ['Ibagué', 'Espinal', 'Melgar', 'Honda'],
+    'Valle del Cauca': [
+      'Cali',
+      'Palmira',
+      'Buenaventura',
+      'Tuluá',
+      'Cartago',
+      'Buga',
+      'Yumbo',
+      'Jamundí',
+    ],
+    'Vaupés': ['Mitú'],
+    'Vichada': ['Puerto Carreño'],
+    'Bogotá D.C.': ['Bogotá'],
+  };
+}

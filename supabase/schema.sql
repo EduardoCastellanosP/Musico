@@ -40,7 +40,7 @@ alter table public.profiles
 -- 1.1 Selección múltiple: instrumentos, géneros y servicios
 -- Reemplaza las columnas escalares `instrument`/`genre` por arreglos, y
 -- añade `services` para que un músico pueda ofrecerse como "Músico",
--- "Sonido", "Ensayadero", etc. al mismo tiempo. `service_description` es el
+-- "Sonido", "Ensayaderos", etc. al mismo tiempo. `service_description` es el
 -- inventario/descripción libre para servicios técnicos (sonido, ensayadero,
 -- ...); `availability_note` es la franja horaria habitual que el músico
 -- describe mientras está "libre" (cuando está "ocupado" se usan en cambio
@@ -102,7 +102,7 @@ end $$;
 
 comment on column public.profiles.instruments is 'Instrumentos que toca el músico (selección múltiple). Vacío si solo ofrece servicios técnicos.';
 comment on column public.profiles.genres is 'Géneros musicales que interpreta (selección múltiple).';
-comment on column public.profiles.services is 'Servicios ofrecidos: "Músico", "Sonido", "Ensayadero", etc. (selección múltiple).';
+comment on column public.profiles.services is 'Servicios ofrecidos: "Músico", "Sonido", "Ensayaderos", etc. (selección múltiple).';
 comment on column public.profiles.service_description is 'Inventario/descripción libre de servicios técnicos (sonido, ensayadero, ...).';
 comment on column public.profiles.availability_note is 'Franja horaria habitual descrita en texto libre mientras el músico está "libre".';
 
@@ -128,6 +128,120 @@ create index if not exists profiles_city_idx
   on public.profiles (city);
 
 -- =========================================================
+-- 1.3 Multimedia del perfil: fotos y videos
+-- Reemplaza la tabla relacional `musician_photos` (sección 3, más abajo)
+-- como fuente de verdad para el portafolio: `photos`/`videos` viven
+-- directamente en `profiles`, igual que `instruments`/`genres`/`services`,
+-- que ya siguen este mismo patrón de arreglo. `musician_photos` se deja
+-- intacta (no se borra) para no perder datos existentes; el backfill de
+-- abajo la copia una sola vez a `photos` y de ahí en adelante la app solo
+-- lee/escribe `profiles.photos`. Los CHECK de abajo son la contraparte en
+-- base de datos de los límites de la UI (10 fotos / 3 videos): la UI ya los
+-- valida antes de subir nada, pero el CHECK es lo que garantiza el límite
+-- de verdad, sin importar qué cliente esté escribiendo.
+-- =========================================================
+alter table public.profiles
+  add column if not exists photos text[] not null default '{}';
+
+alter table public.profiles
+  add column if not exists videos text[] not null default '{}';
+
+alter table public.profiles drop constraint if exists profiles_photos_max_10;
+alter table public.profiles add constraint profiles_photos_max_10
+  check (array_length(photos, 1) is null or array_length(photos, 1) <= 10);
+
+alter table public.profiles drop constraint if exists profiles_videos_max_3;
+alter table public.profiles add constraint profiles_videos_max_3
+  check (array_length(videos, 1) is null or array_length(videos, 1) <= 3);
+
+comment on column public.profiles.photos is 'Hasta 10 URLs públicas del bucket `musician-photos`, portafolio visible en el directorio.';
+comment on column public.profiles.videos is 'DEPRECADA (histórica): superseded por la tabla relacional `musician_videos` (sección 11) — el conteo de vistas por video no es representable en un arreglo plano. Se conserva sin borrar como respaldo de lo ya migrado por el backfill de la sección 11.';
+
+-- Backfill único desde `musician_photos`: solo corre mientras `photos` siga
+-- vacío para un perfil dado, así que es seguro volver a ejecutar este
+-- script completo sin duplicar nada.
+update public.profiles p
+set photos = coalesce(
+  (
+    select array_agg(mp.image_url order by mp.created_at desc)
+    from public.musician_photos mp
+    where mp.musician_id = p.id
+  ),
+  '{}'
+)
+where p.photos = '{}'
+  and exists (select 1 from public.musician_photos mp where mp.musician_id = p.id);
+
+-- Añadir/quitar un elemento vía RPC en lugar de un `.update()` directo
+-- desde PostgREST es lo que permite una mutación atómica de tipo
+-- "append"/"remove" sobre el arreglo (PostgREST solo puede *reemplazar* una
+-- columna completa, no expresar `array_append`/`array_remove`), y es lo que
+-- hace valer el CHECK de arriba ante ediciones concurrentes desde dos
+-- dispositivos a la vez. `add_profile_video`/`remove_profile_video` quedan
+-- abajo por compatibilidad histórica, pero DEPRECADAS: la app ya no las
+-- llama — ver sección 11 para el reemplazo relacional.
+create or replace function public.add_profile_photo(photo_url text)
+returns void
+language plpgsql
+security invoker
+as $$
+begin
+  update public.profiles
+  set photos = array_append(photos, photo_url)
+  where id = auth.uid();
+
+  if not found then
+    raise exception 'No hay una sesión activa o el perfil no existe.';
+  end if;
+end;
+$$;
+
+create or replace function public.remove_profile_photo(photo_url text)
+returns void
+language plpgsql
+security invoker
+as $$
+begin
+  update public.profiles
+  set photos = array_remove(photos, photo_url)
+  where id = auth.uid();
+end;
+$$;
+
+create or replace function public.add_profile_video(video_url text)
+returns void
+language plpgsql
+security invoker
+as $$
+begin
+  update public.profiles
+  set videos = array_append(videos, video_url)
+  where id = auth.uid();
+
+  if not found then
+    raise exception 'No hay una sesión activa o el perfil no existe.';
+  end if;
+end;
+$$;
+
+create or replace function public.remove_profile_video(video_url text)
+returns void
+language plpgsql
+security invoker
+as $$
+begin
+  update public.profiles
+  set videos = array_remove(videos, video_url)
+  where id = auth.uid();
+end;
+$$;
+
+grant execute on function public.add_profile_photo(text) to authenticated;
+grant execute on function public.remove_profile_photo(text) to authenticated;
+grant execute on function public.add_profile_video(text) to authenticated;
+grant execute on function public.remove_profile_video(text) to authenticated;
+
+-- =========================================================
 -- 2. Tabla `contact_events`
 -- Registra cada vez que alguien contacta a un músico (WhatsApp/llamada),
 -- usada para alimentar el panel de estadísticas de "Mi Estado".
@@ -143,9 +257,11 @@ create index if not exists contact_events_musician_id_created_at_idx
   on public.contact_events (musician_id, created_at desc);
 
 -- =========================================================
--- 3. Tabla `musician_photos`
--- Portafolio de fotos de presentaciones en vivo, mostrado en la galería de
--- "Mi Estado" y en la vista de detalle del músico dentro del dashboard.
+-- 3. Tabla `musician_photos` (histórica/deprecada)
+-- Superseded por `profiles.photos` (sección 1.3): la app ya no lee ni
+-- escribe esta tabla. Se conserva sin borrar únicamente como respaldo de
+-- los datos ya migrados por el backfill de la sección 1.3 — se puede
+-- eliminar en una limpieza futura una vez confirmada la migración.
 -- =========================================================
 create table if not exists public.musician_photos (
   id            uuid primary key default gen_random_uuid(),
@@ -362,3 +478,238 @@ grant execute on function public.search_musicians(text) to authenticated;
 -- "músicos disponibles" del dashboard.
 -- =========================================================
 alter publication supabase_realtime add table public.profiles;
+
+-- =========================================================
+-- 10. Auto-eliminación de cuenta
+-- Permite borrar la propia cuenta desde el cliente sin exponer la
+-- service_role key. `security definer` + `search_path` fijo es lo que le da
+-- a esta función permiso para tocar `auth.users` (vedado a `authenticated`
+-- por defecto); `auth.uid()` dentro del cuerpo garantiza que un usuario solo
+-- puede borrarse a sí mismo. El `on delete cascade` ya configurado en
+-- `profiles` (-> auth.users), `contact_events` y `musician_photos`
+-- (-> profiles) limpia todo lo demás automáticamente; los archivos en
+-- Storage (avatar, galería) se borran desde el cliente antes de llamar a
+-- esta función, ya que Storage vive fuera del grafo de llaves foráneas.
+--
+-- El `alter function ... owner to postgres` es la parte que de verdad
+-- importa: una función `security definer` corre con los privilegios de su
+-- DUEÑO, no de quien la llama. Si el owner terminó siendo un rol sin
+-- privilegios sobre el esquema `auth` (posible según cómo se haya
+-- ejecutado este script), el `delete from auth.users` falla con
+-- "permission denied" — fijar el owner a `postgres` (miembro de
+-- `supabase_auth_admin` en todo proyecto Supabase) es lo que lo corrige. El
+-- `grant` envuelto en `do $$ ... exception ... $$` es un refuerzo best-effort:
+-- normalmente ya innecesario tras el `alter owner`, pero no rompe el script
+-- si el rol que lo ejecuta no tiene autoridad para otorgarlo.
+-- =========================================================
+create or replace function public.delete_own_account()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+begin
+  if uid is null then
+    raise exception 'No hay una sesión activa.';
+  end if;
+
+  delete from auth.users where id = uid;
+end;
+$$;
+
+grant execute on function public.delete_own_account() to authenticated;
+alter function public.delete_own_account() owner to postgres;
+
+do $$
+begin
+  grant delete on auth.users to postgres;
+exception when others then
+  raise notice 'No se pudo otorgar DELETE sobre auth.users a postgres (probablemente ya lo tiene). Continuando...';
+end;
+$$;
+
+-- =========================================================
+-- 11. Multimedia de video: tabla relacional, vistas y storage
+-- Reemplaza `profiles.videos` (arreglo plano, sección 1.3, ahora
+-- deprecada): un contador de vistas por video no es representable en un
+-- arreglo de texto, así que los videos pasan a ser filas propias con su
+-- `views_count`. Los videos ahora son archivos subidos al bucket
+-- `musician-videos` (comprimidos en el dispositivo antes de subir), no
+-- enlaces externos — de ahí que ya no haga falta un `isSupportedVideoUrl`
+-- del lado del cliente.
+-- =========================================================
+create table if not exists public.musician_videos (
+  id           uuid primary key default gen_random_uuid(),
+  musician_id  uuid not null references public.profiles (id) on delete cascade,
+  video_url    text not null,
+  views_count  integer not null default 0 check (views_count >= 0),
+  created_at   timestamptz not null default now()
+);
+
+create index if not exists musician_videos_musician_id_created_at_idx
+  on public.musician_videos (musician_id, created_at desc);
+
+comment on table public.musician_videos is 'Portafolio de video de cada músico, hasta 3 por músico (musician_videos_max_3), con conteo de vistas.';
+
+-- Un CHECK no puede contar filas hermanas, así que el límite de 3 (a
+-- diferencia del de fotos, un simple `array_length <= 10`) se aplica con un
+-- trigger — la contraparte en base de datos del bloqueo que ya hace la UI
+-- en `MediaManagerCard`.
+create or replace function public.enforce_max_videos()
+returns trigger
+language plpgsql
+as $$
+begin
+  if (select count(*) from public.musician_videos where musician_id = new.musician_id) >= 3 then
+    raise exception 'Ya tienes el máximo de 3 videos.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists musician_videos_max_3 on public.musician_videos;
+create trigger musician_videos_max_3
+  before insert on public.musician_videos
+  for each row
+  execute function public.enforce_max_videos();
+
+alter table public.musician_videos enable row level security;
+
+drop policy if exists "musician_videos_select_authenticated" on public.musician_videos;
+create policy "musician_videos_select_authenticated"
+  on public.musician_videos
+  for select
+  to authenticated
+  using (true);
+
+drop policy if exists "musician_videos_insert_own" on public.musician_videos;
+create policy "musician_videos_insert_own"
+  on public.musician_videos
+  for insert
+  to authenticated
+  with check (auth.uid() = musician_id);
+
+drop policy if exists "musician_videos_delete_own" on public.musician_videos;
+create policy "musician_videos_delete_own"
+  on public.musician_videos
+  for delete
+  to authenticated
+  using (auth.uid() = musician_id);
+
+-- Deliberadamente SIN policy de `update` para `authenticated`: la única
+-- columna mutable, `views_count`, solo debe cambiar a través de
+-- `increment_video_view` (más abajo), nunca por un `.update()` directo
+-- desde el cliente — ni siquiera el propio dueño del video.
+
+-- Backfill único desde `profiles.videos`: cada perfil ya estaba limitado a
+-- 3 por el CHECK `profiles_videos_max_3`, así que el trigger de arriba
+-- nunca debería rechazar estas filas. Solo corre una vez por músico (el
+-- `not exists` evita duplicar en reintentos de este script).
+insert into public.musician_videos (musician_id, video_url)
+select p.id, v.video_url
+from public.profiles p
+cross join lateral unnest(p.videos) as v(video_url)
+where not exists (
+  select 1 from public.musician_videos mv where mv.musician_id = p.id
+);
+
+-- Log de vistas: una fila por (video, espectador, momento), usado solo
+-- para el control anti-spam de `increment_video_view` — no se expone
+-- ninguna escritura directa a `authenticated`, todo pasa por esa función.
+create table if not exists public.video_view_events (
+  id         uuid primary key default gen_random_uuid(),
+  video_id   uuid not null references public.musician_videos (id) on delete cascade,
+  viewer_id  uuid not null references auth.users (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists video_view_events_video_viewer_idx
+  on public.video_view_events (video_id, viewer_id, created_at desc);
+
+alter table public.video_view_events enable row level security;
+
+drop policy if exists "video_view_events_select_own" on public.video_view_events;
+create policy "video_view_events_select_own"
+  on public.video_view_events
+  for select
+  to authenticated
+  using (auth.uid() = viewer_id);
+
+-- Incremento atómico con enfriamiento anti-spam: el mismo espectador
+-- viendo el mismo video más de una vez en 30 minutos no vuelve a contar.
+-- `security definer` + owner `postgres` (que en Supabase tiene el atributo
+-- BYPASSRLS) es lo que le permite escribir en `video_view_events` y
+-- `musician_videos.views_count` sin necesitar una policy de `update`
+-- pública sobre esa columna — mismo patrón de refuerzo que
+-- `delete_own_account` (sección 10).
+create or replace function public.increment_video_view(video_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  viewer uuid := auth.uid();
+  recent_view_exists boolean;
+begin
+  if viewer is null then
+    raise exception 'No hay una sesión activa.';
+  end if;
+
+  select exists (
+    select 1 from public.video_view_events e
+    where e.video_id = increment_video_view.video_id
+      and e.viewer_id = viewer
+      and e.created_at > now() - interval '30 minutes'
+  ) into recent_view_exists;
+
+  if recent_view_exists then
+    return;
+  end if;
+
+  insert into public.video_view_events (video_id, viewer_id) values (video_id, viewer);
+
+  update public.musician_videos
+  set views_count = views_count + 1
+  where id = video_id;
+end;
+$$;
+
+grant execute on function public.increment_video_view(uuid) to authenticated;
+alter function public.increment_video_view(uuid) owner to postgres;
+
+-- Storage: bucket `musician-videos`, mismo patrón que `musician-photos`
+-- (lectura pública, escritura restringida al propio músico vía el
+-- prefijo de carpeta `{uid}/...`).
+insert into storage.buckets (id, name, public)
+values ('musician-videos', 'musician-videos', true)
+on conflict (id) do update set public = excluded.public;
+
+drop policy if exists "musician_videos_storage_select" on storage.objects;
+create policy "musician_videos_storage_select"
+  on storage.objects
+  for select
+  to public
+  using (bucket_id = 'musician-videos');
+
+drop policy if exists "musician_videos_storage_insert" on storage.objects;
+create policy "musician_videos_storage_insert"
+  on storage.objects
+  for insert
+  to authenticated
+  with check (
+    bucket_id = 'musician-videos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "musician_videos_storage_delete" on storage.objects;
+create policy "musician_videos_storage_delete"
+  on storage.objects
+  for delete
+  to authenticated
+  using (
+    bucket_id = 'musician-videos'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );

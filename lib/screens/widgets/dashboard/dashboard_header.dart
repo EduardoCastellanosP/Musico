@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_notifier.dart';
+import 'availability_switch.dart';
 
 const List<String> _weekdayNames = [
   'lunes',
@@ -39,20 +40,28 @@ String _friendlyToday() {
 
 /// Top-of-dashboard hero: gradient banner with today's date, the musician's
 /// real name from their Supabase profile, a live count of who's free right
-/// now, the "VALLENATOCONNECT" brand mark, and quick access to theme
-/// toggle + "Mi Estado". Visual only — every value below is still exactly
-/// what [DashboardScreen] already computes and passes in.
+/// now, a quick availability toggle, and access to theme toggle + "Mi
+/// Estado". Visual only — every value below is still exactly what
+/// [DashboardScreen] already computes and passes in.
 class DashboardHeader extends StatelessWidget {
   const DashboardHeader({
     super.key,
     required this.greetingName,
     required this.availableCount,
     required this.onSettingsTap,
+    required this.isFree,
+    required this.onAvailabilityChanged,
   });
 
   final String? greetingName;
   final int availableCount;
   final VoidCallback onSettingsTap;
+
+  /// The logged-in musician's own current availability, and the callback
+  /// that fires the optimistic Supabase update — see
+  /// [DashboardScreen._onAvailabilityChanged].
+  final bool isFree;
+  final ValueChanged<bool> onAvailabilityChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -92,6 +101,8 @@ class DashboardHeader extends StatelessWidget {
                 greetingName: greetingName,
                 availableCount: availableCount,
                 onSettingsTap: onSettingsTap,
+                isFree: isFree,
+                onAvailabilityChanged: onAvailabilityChanged,
               ),
             ),
           ],
@@ -109,11 +120,15 @@ class _HeaderContent extends StatelessWidget {
     required this.greetingName,
     required this.availableCount,
     required this.onSettingsTap,
+    required this.isFree,
+    required this.onAvailabilityChanged,
   });
 
   final String? greetingName;
   final int availableCount;
   final VoidCallback onSettingsTap;
+  final bool isFree;
+  final ValueChanged<bool> onAvailabilityChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -187,25 +202,7 @@ class _HeaderContent extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 20),
-        Text(
-          'VALLENATOCONNECT',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: Colors.white.withValues(alpha: 0.65),
-            fontWeight: FontWeight.w700,
-            letterSpacing: 4,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Container(
-          height: 2,
-          width: 64,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(2),
-            gradient: const LinearGradient(
-              colors: [Color(0xFFEC4899), Color(0xFF60A5FA)],
-            ),
-          ),
-        ),
+        AvailabilitySwitch(isFree: isFree, onChanged: onAvailabilityChanged),
       ],
     );
   }
