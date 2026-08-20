@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/genres.dart';
 import '../../../core/constants/instruments.dart';
 import '../../../core/constants/services.dart';
+import '../../../core/security/input_sanitizer.dart'; // 🔒 FASE 3: Sanitización de entradas
 import '../../../core/theme/app_theme.dart';
 
 /// Search field + genre/instrument/service pickers + "solo libres" and
@@ -50,16 +51,6 @@ class SearchFilterBar extends StatelessWidget {
   final String? homeCity;
 
   /// Opens the bottom sheet for one category (Género/Instrumento/Servicios).
-  ///
-  /// [selected]/[onSelected] are exactly the props this widget was given —
-  /// tapping a chip still calls that same global callback. The sheet also
-  /// keeps a `localSelection` copy purely so it can redraw itself the
-  /// instant a chip is tapped: [SearchFilterBar] is a [StatelessWidget], so
-  /// its `selected` field is frozen to whatever it was when the sheet was
-  /// opened and only changes once the parent rebuilds a *new*
-  /// `SearchFilterBar` — which normally wouldn't happen until this sheet is
-  /// closed and reopened. The [StatefulBuilder] + local variable make the
-  /// sheet reactive in the meantime without touching any app state.
   void _openCategorySheet(
     BuildContext context, {
     required String title,
@@ -146,7 +137,11 @@ class SearchFilterBar extends StatelessWidget {
         children: [
           TextField(
             controller: searchController,
-            onChanged: onSearchChanged,
+            // 🔒 FASE 3: Intercepta y limpia la consulta antes de enviarla
+            onChanged: (rawQuery) {
+              final cleanQuery = InputSanitizer.sanitizeSearchQuery(rawQuery);
+              onSearchChanged(cleanQuery);
+            },
             style: theme.textTheme.bodyLarge,
             decoration: InputDecoration(
               filled: true,
@@ -171,7 +166,7 @@ class SearchFilterBar extends StatelessWidget {
                     title: 'Género',
                     options: MusicGenres.all,
                     selected: selectedGenre,
-                    onSelected: onGenreSelected, // lógica existente
+                    onSelected: onGenreSelected,
                   ),
                 ),
               ),
@@ -185,7 +180,7 @@ class SearchFilterBar extends StatelessWidget {
                     title: 'Instrumento',
                     options: VallenatoInstruments.all,
                     selected: selectedInstrument,
-                    onSelected: onInstrumentSelected, // lógica existente
+                    onSelected: onInstrumentSelected,
                     includeAllOption: true,
                   ),
                 ),
@@ -200,7 +195,7 @@ class SearchFilterBar extends StatelessWidget {
                     title: 'Servicios',
                     options: MusicianServices.all,
                     selected: selectedService,
-                    onSelected: onServiceSelected, // lógica existente
+                    onSelected: onServiceSelected,
                   ),
                 ),
               ),
@@ -215,7 +210,7 @@ class SearchFilterBar extends StatelessWidget {
                     icon: Icons.people_alt_rounded,
                     label: 'Músicos libres',
                     value: onlyFree,
-                    onChanged: onOnlyFreeChanged, // lógica existente
+                    onChanged: onOnlyFreeChanged,
                   ),
                 ),
                 VerticalDivider(
@@ -231,14 +226,9 @@ class SearchFilterBar extends StatelessWidget {
                   child: _SwitchOption(
                     icon: Icons.location_on_rounded,
                     label: 'De mi ciudad',
-                    // `searchNationwide` is the underlying state; this
-                    // switch just reads/writes it inverted so "ON" means
-                    // "cerca de mí" (the label the design calls for)
-                    // instead of "todo el país" — same callback, same
-                    // state, only the boolean is flipped at the UI edge.
                     value: !searchNationwide,
                     onChanged: (onlyMyCity) =>
-                        onNationwideChanged(!onlyMyCity), // lógica existente
+                        onNationwideChanged(!onlyMyCity),
                   ),
                 ),
               ],
@@ -295,10 +285,6 @@ class SearchFilterBar extends StatelessWidget {
   }
 }
 
-/// One of the three pill-shaped "dropdown" buttons (Género/Instrumento/
-/// Servicios) that open a bottom sheet with the real picker. Always renders
-/// with the same subtle, static fill/border — no highlight color based on
-/// whether a selection is active.
 class _CategoryDropdownField extends StatelessWidget {
   const _CategoryDropdownField({
     required this.emoji,
@@ -358,9 +344,6 @@ class _CategoryDropdownField extends StatelessWidget {
   }
 }
 
-/// Half of the split switch row: icon, label and [Switch] all on one line
-/// (`Row: [Icono, texto, Spacer(), Switch]`), driven by the exact
-/// [value]/[onChanged] pair passed in from [SearchFilterBar].
 class _SwitchOption extends StatelessWidget {
   const _SwitchOption({
     required this.icon,
@@ -380,17 +363,14 @@ class _SwitchOption extends StatelessWidget {
     final extension = theme.extension<AppThemeExtension>();
 
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 4,
-      ), // Margen ajustado para ganar espacio
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
         children: [
           Icon(icon, size: 14, color: extension?.textSecondary),
           const SizedBox(width: 4),
           Expanded(
             child: FittedBox(
-              fit: BoxFit
-                  .scaleDown, // <--- La clave: escala el texto si es muy largo para que NUNCA se corte
+              fit: BoxFit.scaleDown,
               alignment: Alignment.centerLeft,
               child: Text(
                 label,
@@ -403,7 +383,7 @@ class _SwitchOption extends StatelessWidget {
             ),
           ),
           Transform.scale(
-            scale: 0.75, // Switch un poco más compacto horizontalmente
+            scale: 0.75,
             child: Switch.adaptive(
               value: value,
               onChanged: onChanged,

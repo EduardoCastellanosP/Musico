@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
+import 'core/security/secure_local_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_notifier.dart';
 import 'screens/auth_gate.dart';
@@ -15,6 +15,9 @@ Future<void> main() async {
   await Supabase.initialize(
     url: dotenv.get('SUPABASE_URL'),
     anonKey: dotenv.get('SUPABASE_ANON_KEY'),
+    authOptions: FlutterAuthClientOptions(
+      localStorage: SecureLocalStorage(), // 🔒 Almacenamiento seguro
+    ),
   );
 
   await NotificationService.instance.initialize();

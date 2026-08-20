@@ -449,7 +449,8 @@ class _StatusScreenState extends State<StatusScreen>
     if (_fullNameController.text.trim().isEmpty) {
       return 'El nombre completo no puede estar vacío.';
     }
-    if (_phoneController.text.trim().length != 10) {
+    final phoneDigits = _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
+    if (phoneDigits.length != 10) {
       return 'Ingresa un número de WhatsApp válido de 10 dígitos.';
     }
     if (_selectedServices.isEmpty) {
@@ -475,7 +476,8 @@ class _StatusScreenState extends State<StatusScreen>
     try {
       final fullName = _fullNameController.text.trim();
       final city = _cityController.text.trim();
-      final phone = '+57${_phoneController.text.trim()}';
+      final phoneDigits = _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
+      final phone = '+57$phoneDigits';
       final statusMessage = _messageController.text.trim();
       final availabilityNote = _availabilityNoteController.text.trim();
       final serviceDescription = _serviceDescriptionController.text.trim();

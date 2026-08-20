@@ -13,9 +13,10 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     
     <application
-        android:label="vallenato_connect"
+        android:label="MUSSY"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        
         android:allowBackup="false"        
         android:usesCleartextTraffic="false" 
         android:networkSecurityConfig="@xml/network_security_config" >

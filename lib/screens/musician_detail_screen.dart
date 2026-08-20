@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
-
+import '../core/utils/app_logger.dart';
 import '../core/constants/whatsapp.dart';
 import '../core/theme/app_theme.dart';
 import '../core/utils/video_thumbnail.dart';
@@ -41,13 +41,16 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
     _videos = List<MusicianVideo>.from(widget.musician.videos);
   }
 
-  Future<void> _contact({required bool isWhatsApp}) async {
+ Future<void> _contact({required bool isWhatsApp}) async {
     final musician = widget.musician;
     final uri = isWhatsApp ? musician.whatsappUri : musician.callUri;
-
-    // Validación SAST: Asegurar que el esquema de la URI es seguro
-    if (!['https', 'tel', 'whatsapp'].contains(uri.scheme)) return;
-
+    
+    // Validación SAST: Asegurar que el esquema de la URI sea un canal seguro/permitido
+    if (!['https', 'http', 'tel', 'whatsapp'].contains(uri.scheme)) {
+      debugPrint("🛑 SEGURIDAD: Esquema bloqueado -> ${uri.scheme}");
+      return;
+    }
+    
     // Verificar si el dispositivo puede manejar la acción de forma segura
     if (await canLaunchUrl(uri)) {
       final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -301,7 +304,7 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
 
     if (photos.isEmpty) {
       return Text(
-        'Este músico aún no agregó fotos a su portafolio.',
+        'Aún no agregó fotos a su portafolio.',
         style: theme.textTheme.bodyMedium?.copyWith(
           color: extension?.textSecondary,
         ),
@@ -362,10 +365,6 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
       ),
       itemBuilder: (context, index) {
         final video = _videos[index];
-        // Only resolves for legacy YouTube links carried over from before
-        // videos became uploaded files — new uploads show the generic
-        // placeholder below instead (see MediaManagerCard's `_VideoTile`
-        // doc comment for why real thumbnail generation is out of scope).
         final thumbnail = youtubeThumbnail(video.videoUrl);
         return ClipRRect(
           borderRadius: BorderRadius.circular(12),

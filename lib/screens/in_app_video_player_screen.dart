@@ -44,6 +44,11 @@ class _InAppVideoPlayerScreenState extends State<InAppVideoPlayerScreen> {
   }
 
  Future<void> _initialize() async {
+  // --- INYECCIÓN DE PRUEBA (DESCOMENTAR UNA A LA VEZ) ---
+  // String testUrl = "file:///data/user/0/io.supabase.vallenatoconnect/databases/app.db";
+  // String testUrl = "javascript:alert('xss')";
+  // String testUrl = "ht!tp://:::url_corrupta";
+  // final uri = Uri.tryParse(testUrl);
     // 1. Validación de seguridad para calmar al escáner SAST
     final uri = Uri.tryParse(widget.videoUrl);
     if (uri == null || !['http', 'https'].contains(uri.scheme)) {
