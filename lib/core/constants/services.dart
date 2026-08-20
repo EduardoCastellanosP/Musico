@@ -17,7 +17,9 @@ abstract final class MusicianServices {
     'Animador',
     'Alquiler de equipos',
     'Alquiler de escenarios',
-    'Alquiler de vehículos'
+    'Alquiler de vehículos',
+    'Catering',
+    'Fotografia y video',
   ];
 
   /// Every service other than [musician] is treated as a technical service

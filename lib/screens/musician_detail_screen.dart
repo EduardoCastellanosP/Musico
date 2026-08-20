@@ -44,14 +44,22 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
   Future<void> _contact({required bool isWhatsApp}) async {
     final musician = widget.musician;
     final uri = isWhatsApp ? musician.whatsappUri : musician.callUri;
-    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!launched) return;
-    unawaited(
-      _repository.logContactEvent(
-        musicianId: musician.id,
-        contactType: isWhatsApp ? 'whatsapp' : 'call',
-      ),
-    );
+
+    // Validación SAST: Asegurar que el esquema de la URI es seguro
+    if (!['https', 'tel', 'whatsapp'].contains(uri.scheme)) return;
+
+    // Verificar si el dispositivo puede manejar la acción de forma segura
+    if (await canLaunchUrl(uri)) {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) return;
+      
+      unawaited(
+        _repository.logContactEvent(
+          musicianId: musician.id,
+          contactType: isWhatsApp ? 'whatsapp' : 'call',
+        ),
+      );
+    }
   }
 
   void _openPhoto(String url) {

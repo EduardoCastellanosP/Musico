@@ -1,7 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- The INTERNET permission is required for development... -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
-    <!-- AÑADE ESTO PARA CERRAR LA ALERTA DE AIKIDO -->
-    <application android:networkSecurityConfig="@xml/network_security_config" />
+    <application 
+        android:allowBackup="false"
+        android:networkSecurityConfig="@xml/network_security_config">
+    </application>
 </manifest>

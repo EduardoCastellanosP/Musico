@@ -43,10 +43,16 @@ class _InAppVideoPlayerScreenState extends State<InAppVideoPlayerScreen> {
     _initialize();
   }
 
-  Future<void> _initialize() async {
-    final controller = VideoPlayerController.networkUrl(
-      Uri.parse(widget.videoUrl),
-    );
+ Future<void> _initialize() async {
+    // 1. Validación de seguridad para calmar al escáner SAST
+    final uri = Uri.tryParse(widget.videoUrl);
+    if (uri == null || !['http', 'https'].contains(uri.scheme)) {
+      if (mounted) setState(() => _hasError = true);
+      return;
+    }
+
+    final controller = VideoPlayerController.networkUrl(uri);
+    
     try {
       await controller.initialize();
       // The screen may have been popped while `initialize()` was still in
