@@ -32,7 +32,13 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
-
+# Llaves de firma de Android
+key.jks
+android/key.jks
+android/key.properties
+# Archivos de distribución (No subir a git)
+*.aab
+*.apk
 # Environment variables (contains Supabase credentials, never commit)
 .env
 

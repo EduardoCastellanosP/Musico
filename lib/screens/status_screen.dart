@@ -19,6 +19,7 @@ import 'widgets/status/coverage_cities_card.dart';
 import 'widgets/status/media_manager_card.dart';
 import 'widgets/status/message_field_card.dart';
 import 'widgets/status/musician_skills_card.dart';
+import 'profile_preview_screen.dart';
 import 'widgets/status/profile_avatar_editor.dart';
 import 'widgets/status/profile_info_card.dart';
 import 'widgets/status/service_inventory_card.dart';
@@ -44,6 +45,8 @@ class _StatusScreenState extends State<StatusScreen>
   final TextEditingController _messageController = TextEditingController();
   final TextEditingController _fullNameController = TextEditingController();
   final TextEditingController _cityController = TextEditingController();
+  final TextEditingController _experienceYearsController =
+      TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _availabilityNoteController =
       TextEditingController();
@@ -86,6 +89,7 @@ class _StatusScreenState extends State<StatusScreen>
     _messageController.dispose();
     _fullNameController.dispose();
     _cityController.dispose();
+    _experienceYearsController.dispose();
     _phoneController.dispose();
     _availabilityNoteController.dispose();
     _serviceDescriptionController.dispose();
@@ -122,6 +126,7 @@ class _StatusScreenState extends State<StatusScreen>
       _messageController.text = profile.statusMessage;
       _fullNameController.text = profile.fullName;
       _cityController.text = profile.city;
+      _experienceYearsController.text = profile.experienceYears.toString();
       _phoneController.text = _localPhoneDigits(profile.phone);
       _coverageCities = List<String>.from(profile.coverageCities);
       _selectedInstruments = List<String>.from(profile.instruments);
@@ -456,6 +461,10 @@ class _StatusScreenState extends State<StatusScreen>
     if (_selectedServices.isEmpty) {
       return 'Selecciona al menos un servicio que ofreces.';
     }
+    final experienceYears = int.tryParse(_experienceYearsController.text.trim());
+    if (experienceYears == null || experienceYears < 0) {
+      return 'Ingresa un número válido de años de experiencia.';
+    }
     return null;
   }
 
@@ -476,6 +485,8 @@ class _StatusScreenState extends State<StatusScreen>
     try {
       final fullName = _fullNameController.text.trim();
       final city = _cityController.text.trim();
+      final experienceYears =
+          int.parse(_experienceYearsController.text.trim());
       final phoneDigits = _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
       final phone = '+57$phoneDigits';
       final statusMessage = _messageController.text.trim();
@@ -502,6 +513,7 @@ class _StatusScreenState extends State<StatusScreen>
           fullName: fullName,
           instruments: instruments,
           city: city,
+          experienceYears: experienceYears,
           phone: phone,
           genres: genres,
           services: _selectedServices,
@@ -527,6 +539,7 @@ class _StatusScreenState extends State<StatusScreen>
           fullName: fullName,
           instruments: instruments,
           city: city,
+          experienceYears: experienceYears,
           phone: phone,
           genres: genres,
           services: _selectedServices,
@@ -580,6 +593,17 @@ class _StatusScreenState extends State<StatusScreen>
                         onPressed: () => Navigator.of(context).pop(),
                         icon: const Icon(Icons.arrow_back_rounded),
                       ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'Ver cómo luce mi perfil',
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                ProfilePreviewScreen(musician: _profile!),
+                          ),
+                        ),
+                        icon: const Icon(Icons.visibility_outlined),
+                      ),
                     ],
                   ),
                   Text(
@@ -599,6 +623,7 @@ class _StatusScreenState extends State<StatusScreen>
                   ProfileInfoCard(
                     fullNameController: _fullNameController,
                     cityController: _cityController,
+                    experienceYearsController: _experienceYearsController,
                     phoneController: _phoneController,
                   ),
                   const SizedBox(height: 4),

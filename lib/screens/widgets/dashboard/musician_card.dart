@@ -233,31 +233,20 @@ class _MusicianCardContent extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-             Expanded(
-  child: SizedBox(
-    height: 40,
-    child: FilledButton(
-      onPressed: musician.hasPhone ? onWhatsAppTap : null,
-      style: FilledButton.styleFrom(
-        backgroundColor: Colors.white, // Fondo blanco visible
-        disabledBackgroundColor: Colors.grey.shade200,
-        elevation: 0,
-        padding: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: Colors.grey.shade300, width: 1), // Borde sutil
-        ),
-      ),
-      child: Center(
-        child: SvgPicture.asset(
-          'assets/images/logowpp.svg',
-          width: 24,
-          height: 24,
-        ),
-      ),
-    ),
-  ),
-),
+              Expanded(
+                child: _ActionButton(
+                  iconWidget: SvgPicture.asset(
+                    'assets/images/logowpp.svg',
+                    width: 20,
+                    height: 20,
+                    // colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+                  ),
+                  label: 'Wpp',
+                  backgroundColor: const Color(0xFF25D366),
+                  foregroundColor: Colors.white,
+                  onTap: musician.hasPhone ? onWhatsAppTap : null,
+                ),
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: _ActionButton(
@@ -303,6 +292,7 @@ class _ActionButton extends StatelessWidget {
           backgroundColor: backgroundColor,
           foregroundColor: foregroundColor,
           disabledBackgroundColor: backgroundColor.withValues(alpha: 0.4),
+          disabledForegroundColor: Colors.white.withValues(alpha: 0.5),
           padding: const EdgeInsets.symmetric(horizontal: 8),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),

@@ -14,11 +14,13 @@ class ProfileInfoCard extends StatelessWidget {
     required this.fullNameController,
     required this.cityController,
     required this.phoneController,
+    required this.experienceYearsController,
   });
 
   final TextEditingController fullNameController;
   final TextEditingController cityController;
   final TextEditingController phoneController;
+  final TextEditingController experienceYearsController;
 
   @override
   Widget build(BuildContext context) {
@@ -82,6 +84,18 @@ class ProfileInfoCard extends StatelessWidget {
               hintText: 'Ej: Valledupar',
               prefixIcon: Icon(Icons.location_on_outlined),
               suffixIcon: Icon(Icons.expand_more_rounded),
+            ),
+          ),
+          const SizedBox(height: 16),
+          _FieldLabel('Años de experiencia'),
+          const SizedBox(height: 6),
+          TextField(
+            controller: experienceYearsController,
+            keyboardType: TextInputType.number,
+            style: theme.textTheme.bodyLarge,
+            decoration: const InputDecoration(
+              hintText: 'Ej: 5',
+              prefixIcon: Icon(Icons.military_tech_outlined),
             ),
           ),
           const SizedBox(height: 16),

@@ -79,6 +79,14 @@ class MusicianRepository {
       query = query.eq('is_free', true);
     }
 
+    final currentUserId = _client.auth.currentUser?.id;
+    if (currentUserId != null) {
+      // Excludes the logged-in musician from their own directory feed —
+      // they manage their profile via [fetchCurrentProfile]/"Mi Estado"
+      // instead of finding themselves in the public listing.
+      query = query.neq('id', currentUserId);
+    }
+
     final city = nearCity?.trim();
     if (!searchNationwide && city != null && city.isNotEmpty) {
       // Dual coverage criterion, widened to the whole metro zone: match
@@ -162,6 +170,7 @@ class MusicianRepository {
     required String fullName,
     required List<String> instruments,
     required String city,
+    required int experienceYears,
     required String phone,
     required List<String> genres,
     required List<String> services,
@@ -175,6 +184,7 @@ class MusicianRepository {
           'full_name': fullName,
           'instruments': instruments,
           'city': city,
+          'experience_years': experienceYears,
           'phone': phone,
           'genres': genres,
           'services': services,

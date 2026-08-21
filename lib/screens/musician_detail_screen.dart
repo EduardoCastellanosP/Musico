@@ -12,6 +12,7 @@ import '../repositories/musician_repository.dart';
 import 'in_app_video_player_screen.dart';
 import 'photo_viewer_screen.dart';
 import 'widgets/dashboard/genre_badge.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 /// Full-screen profile a contratante sees after tapping a [MusicianCard]:
 /// every directory fact plus the musician's photo/video portfolio, so
@@ -234,22 +235,34 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
             Row(
               children: [
                 Expanded(
-                  child: FilledButton.icon(
-                    onPressed: musician.hasPhone
-                        ? () => _contact(isWhatsApp: true)
-                        : null,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF25D366),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    icon: const Icon(Icons.chat_rounded, size: 18),
-                    label: const Text(kWhatsAppShortLabel),
-                  ),
-                ),
+  child: FilledButton(
+    onPressed: musician.hasPhone
+        ? () => _contact(isWhatsApp: true)
+        : null,
+    style: FilledButton.styleFrom(
+      backgroundColor: const Color(0xFF25D366), // Color verde WhatsApp
+      foregroundColor: Colors.white,
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+      ),
+    ),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        SvgPicture.asset(
+          'assets/images/logowpp.svg',
+          width: 20,
+          height: 20,
+          // Forzamos el icono a blanco para que resalte en el fondo verde
+          // colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
+        ),
+        const SizedBox(width: 8),
+        const Text(kWhatsAppShortLabel),
+      ],
+    ),
+  ),
+),
                 const SizedBox(width: 10),
                 Expanded(
                   child: OutlinedButton.icon(

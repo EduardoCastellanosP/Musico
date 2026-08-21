@@ -1,8 +1,16 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+import java.util.Properties
+import java.io.FileInputStream
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -11,33 +19,45 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        // --- AÑADE ESTA LÍNEA AQUÍ ---
         isCoreLibraryDesugaringEnabled = true
-        
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+        jvmTarget = "17"
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.vallenatoconnect.vallenato_connect"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        applicationId = "com.mussy.mussy_connect"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            keyAlias = keystoreProperties.getProperty("keyAlias")
+            keyPassword = keystoreProperties.getProperty("keyPassword")
+            val storeFilepath = keystoreProperties.getProperty("storeFile")
+            if (storeFilepath != null) {
+                storeFile = file(storeFilepath)
+            }
+            storePassword = keystoreProperties.getProperty("storePassword")
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
+            ndk {
+                // "none" deja el bundle sin ningún símbolo nativo, lo cual hace
+                // que `flutter build appbundle` falle su propia verificación
+                // final (busca al menos un .so.sym) y además le quita a Play
+                // Console la posibilidad de deofuscar crashes nativos.
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
         }
     }
 }
@@ -46,7 +66,6 @@ flutter {
     source = "../.."
 }
 
-// --- AÑADE ESTE BLOQUE DE DEPENDENCIAS AL FINAL DEL ARCHIVO ---
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
