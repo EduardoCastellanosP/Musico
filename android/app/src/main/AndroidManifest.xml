@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <!-- Required to show the "¿Ya estás libre?" push and any other local
          notification on Android 13+ (API 33). -->
@@ -7,8 +8,8 @@
          AndroidScheduleMode.exactAllowWhileIdle so the busy-until push
          fires at the precise minute the musician's gig ends, even in
          Doze mode. -->
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <!-- <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/> -->
+    <!-- <uses-permission android:name="android.permission.USE_EXACT_ALARM"/> -->
     <!-- Re-arms scheduled notifications after the device reboots. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     
@@ -47,12 +48,12 @@
                  URL. Must match AuthService.signInWithGoogle's `redirectTo`
                  and the "Redirect URLs" allow-list in the Supabase dashboard
                  (Authentication > URL Configuration) exactly. -->
-            <intent-filter android:autoVerify="true">
+            <intent-filter >
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data
-                    android:scheme="io.supabase.vallenatoconnect"
+                    android:scheme="mussy"
                     android:host="login-callback"/>
             </intent-filter>
         </activity>

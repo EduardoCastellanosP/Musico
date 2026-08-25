@@ -14,7 +14,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.vallenatoconnect.vallenato_connect"
+    namespace = "com.mussy.mussy_connect"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 

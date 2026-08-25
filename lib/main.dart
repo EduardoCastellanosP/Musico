@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';
 import 'core/security/secure_local_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_notifier.dart';
@@ -16,8 +18,19 @@ Future<void> main() async {
     url: dotenv.get('SUPABASE_URL'),
     anonKey: dotenv.get('SUPABASE_ANON_KEY'),
     authOptions: FlutterAuthClientOptions(
-      localStorage: SecureLocalStorage(), // 🔒 Almacenamiento seguro
+      localStorage: SecureLocalStorage(),
     ),
+    debug: true,
+  );
+
+  Supabase.instance.client.auth.onAuthStateChange.listen(
+    (data) {
+      print('GOOGLE OAUTH RESPONSE:  ${data.event}');
+      print('SESSION: ${data.session}');
+    },
+    onError: (error, stackTrace) {
+      print('GOOGLE OAUTH ERROR: $error');
+    },
   );
 
   await NotificationService.instance.initialize();
