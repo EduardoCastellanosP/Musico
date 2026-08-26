@@ -146,6 +146,14 @@ alter table public.profiles
 alter table public.profiles
   add column if not exists videos text[] not null default '{}';
 
+-- Timestamp of the musician's most recent portfolio upload (photo or
+-- video) — drives the dashboard's WhatsApp/Instagram-style "story ring"
+-- around a card's avatar. Bumped by `add_profile_photo` below and by the
+-- `musician_videos_bump_last_media` trigger (section 11) since videos are
+-- inserted directly into `musician_videos`, not through an RPC.
+alter table public.profiles
+  add column if not exists last_media_at timestamptz;
+
 alter table public.profiles drop constraint if exists profiles_photos_max_10;
 alter table public.profiles add constraint profiles_photos_max_10
   check (array_length(photos, 1) is null or array_length(photos, 1) <= 10);
@@ -187,7 +195,8 @@ security invoker
 as $$
 begin
   update public.profiles
-  set photos = array_append(photos, photo_url)
+  set photos = array_append(photos, photo_url),
+      last_media_at = now()
   where id = auth.uid();
 
   if not found then
@@ -477,7 +486,7 @@ grant execute on function public.search_musicians(text) to authenticated;
 -- Habilita cambios en vivo sobre `profiles` para el contador de
 -- "músicos disponibles" del dashboard.
 -- =========================================================
-alter publication supabase_realtime add table public.profiles;
+-- alter publication supabase_realtime add table public.profiles;
 
 -- =========================================================
 -- 10. Auto-eliminación de cuenta
@@ -551,19 +560,19 @@ create table if not exists public.musician_videos (
 create index if not exists musician_videos_musician_id_created_at_idx
   on public.musician_videos (musician_id, created_at desc);
 
-comment on table public.musician_videos is 'Portafolio de video de cada músico, hasta 3 por músico (musician_videos_max_3), con conteo de vistas.';
+comment on table public.musician_videos is 'Portafolio de video de cada músico, hasta 5 por músico (musician_videos_max_3), con conteo de vistas.';
 
--- Un CHECK no puede contar filas hermanas, así que el límite de 3 (a
--- diferencia del de fotos, un simple `array_length <= 10`) se aplica con un
--- trigger — la contraparte en base de datos del bloqueo que ya hace la UI
--- en `MediaManagerCard`.
+-- Un CHECK no puede contar filas hermanas, así que el límite (a diferencia
+-- del de fotos, un simple `array_length <= 10`) se aplica con un trigger —
+-- la contraparte en base de datos del bloqueo que ya hace la UI en
+-- `MediaManagerCard`/`MediaLimits.maxVideos`.
 create or replace function public.enforce_max_videos()
 returns trigger
 language plpgsql
 as $$
 begin
-  if (select count(*) from public.musician_videos where musician_id = new.musician_id) >= 3 then
-    raise exception 'Ya tienes el máximo de 3 videos.';
+  if (select count(*) from public.musician_videos where musician_id = new.musician_id) >= 5 then
+    raise exception 'Ya tienes el máximo de 5 videos.';
   end if;
   return new;
 end;
@@ -574,6 +583,26 @@ create trigger musician_videos_max_3
   before insert on public.musician_videos
   for each row
   execute function public.enforce_max_videos();
+
+-- Videos are inserted directly into this table by `MusicianRepository.addVideo`
+-- (no RPC in the middle, unlike photos' `add_profile_photo`), so
+-- `profiles.last_media_at` needs its own trigger instead of an inline
+-- update alongside the insert.
+create or replace function public.bump_last_media_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  update public.profiles set last_media_at = now() where id = new.musician_id;
+  return new;
+end;
+$$;
+
+drop trigger if exists musician_videos_bump_last_media on public.musician_videos;
+create trigger musician_videos_bump_last_media
+  after insert on public.musician_videos
+  for each row
+  execute function public.bump_last_media_at();
 
 alter table public.musician_videos enable row level security;
 
@@ -713,3 +742,73 @@ create policy "musician_videos_storage_delete"
     bucket_id = 'musician-videos'
     and (storage.foldername(name))[1] = auth.uid()::text
   );
+
+-- =========================================================
+-- 12. Likes y follows del feed de videos
+-- Ambas tablas solo exponen las filas del propio usuario a `select` — ni
+-- un conteo agregado ni "quién más le dio like" son necesarios todavía, así
+-- que no hace falta abrir lectura pública. `VideoFeedScreen` hace una sola
+-- consulta por lote (`in`) al cargar la página para saber cuáles de los
+-- videos/músicos visibles ya tienen like/follow del usuario actual, y
+-- aplica un toggle optimista en el cliente antes de esperar la respuesta.
+-- =========================================================
+create table if not exists public.video_likes (
+  video_id    uuid not null references public.musician_videos (id) on delete cascade,
+  user_id     uuid not null references auth.users (id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  primary key (video_id, user_id)
+);
+
+alter table public.video_likes enable row level security;
+
+drop policy if exists "video_likes_select_own" on public.video_likes;
+create policy "video_likes_select_own"
+  on public.video_likes
+  for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists "video_likes_insert_own" on public.video_likes;
+create policy "video_likes_insert_own"
+  on public.video_likes
+  for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists "video_likes_delete_own" on public.video_likes;
+create policy "video_likes_delete_own"
+  on public.video_likes
+  for delete
+  to authenticated
+  using (auth.uid() = user_id);
+
+create table if not exists public.musician_follows (
+  follower_id  uuid not null references auth.users (id) on delete cascade,
+  musician_id  uuid not null references public.profiles (id) on delete cascade,
+  created_at   timestamptz not null default now(),
+  primary key (follower_id, musician_id),
+  check (follower_id <> musician_id)
+);
+
+alter table public.musician_follows enable row level security;
+
+drop policy if exists "musician_follows_select_own" on public.musician_follows;
+create policy "musician_follows_select_own"
+  on public.musician_follows
+  for select
+  to authenticated
+  using (auth.uid() = follower_id);
+
+drop policy if exists "musician_follows_insert_own" on public.musician_follows;
+create policy "musician_follows_insert_own"
+  on public.musician_follows
+  for insert
+  to authenticated
+  with check (auth.uid() = follower_id);
+
+drop policy if exists "musician_follows_delete_own" on public.musician_follows;
+create policy "musician_follows_delete_own"
+  on public.musician_follows
+  for delete
+  to authenticated
+  using (auth.uid() = follower_id);

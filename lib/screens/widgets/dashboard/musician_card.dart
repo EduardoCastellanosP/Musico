@@ -42,7 +42,10 @@ class MusicianCard extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(flex: 38, child: _MusicianImage(musician: musician)),
+                Expanded(
+                  flex: 38,
+                  child: _MusicianImageFrame(musician: musician),
+                ),
                 Expanded(
                   flex: 62,
                   child: _MusicianCardContent(
@@ -56,6 +59,59 @@ class MusicianCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Caps how tall the photo side of the card can force the whole [Row] to
+/// grow. `IntrinsicHeight` (in [MusicianCard.build]) sizes the row by
+/// asking each child its *intrinsic* height for the available width — an
+/// unconstrained [Image] answers with whatever height its natural aspect
+/// ratio implies, so a musician uploading a very tall/narrow photo used to
+/// blow up the whole card. Wrapping it in a fixed-height [SizedBox] caps
+/// that answer; `CrossAxisAlignment.stretch` on the Row still stretches the
+/// image to the row's *actual* final height (driven by the text side)
+/// afterwards, so normal-sized photos are unaffected.
+class _MusicianImageFrame extends StatelessWidget {
+  const _MusicianImageFrame({required this.musician});
+
+  final Musician musician;
+
+  static const double _maxIntrinsicHeight = 200;
+
+  @override
+  Widget build(BuildContext context) {
+    final image = _MusicianImage(musician: musician);
+    return SizedBox(
+      height: _maxIntrinsicHeight,
+      child: musician.recentlyUploaded
+          ? _StoryRing(child: image)
+          : image,
+    );
+  }
+}
+
+/// WhatsApp/Instagram-style gradient ring signaling the musician uploaded a
+/// photo or video in the last 48h ([Musician.recentlyUploaded]) — a thin
+/// gradient border inset from the card's own edge so it reads as a "story"
+/// frame rather than just a colored outline.
+class _StoryRing extends StatelessWidget {
+  const _StoryRing({required this.child});
+
+  final Widget child;
+
+  static const _ringGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [Color(0xFFF59E0B), Color(0xFFEC4899), Color(0xFF8B5CF6)],
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(gradient: _ringGradient),
+      padding: const EdgeInsets.all(3),
+      child: ClipRect(child: child),
     );
   }
 }
@@ -124,9 +180,16 @@ class _MusicianCardContent extends StatelessWidget {
         ? AppColors.infoChipForegroundDark
         : AppColors.infoChipForegroundLight;
 
+    // Category emoji so the card reads at a glance whether this is a
+    // performer (instruments) or a technical provider (sound gear, venues).
+    final categoryEmoji = musician.offersMusicianService
+        ? '🎸 '
+        : musician.offersTechnicalService
+        ? '🔧 '
+        : '';
     final subtitle = musician.instruments.isNotEmpty
-        ? musician.instrumentsSummary
-        : musician.services.join(' · ');
+        ? '$categoryEmoji${musician.instrumentsSummary}'
+        : '$categoryEmoji${musician.services.join(' · ')}';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),

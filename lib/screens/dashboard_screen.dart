@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/theme/app_theme.dart';
 import '../models/musician.dart';
+import '../models/musician_stats.dart';
 import '../repositories/musician_repository.dart';
 import 'musician_detail_screen.dart';
 import 'status_screen.dart';
@@ -33,6 +34,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   bool _showingCheckoutDialog = false;
 
   Musician? _currentProfile;
+  MusicianStats _stats = MusicianStats.zero;
   List<Musician> _musicians = const [];
   int _availableCount = 0;
   String _search = '';
@@ -94,6 +96,12 @@ class _DashboardScreenState extends State<DashboardScreen>
     if (!mounted) return;
     setState(() => _currentProfile = profile);
     _maybePromptAutoCheckout();
+
+    if (profile != null) {
+      final stats = await _repository.fetchContactStats(profile.id);
+      if (!mounted) return;
+      setState(() => _stats = stats);
+    }
   }
 
   /// Shows the "¿sigues ocupado?" dialog once the musician's own
@@ -262,7 +270,7 @@ class _DashboardScreenState extends State<DashboardScreen>
               SliverToBoxAdapter(
                 child: DashboardHeader(
                   greetingName: _currentProfile?.fullName,
-                  availableCount: _availableCount,
+                  stats: _stats,
                   onSettingsTap: _openStatusScreen,
                   isFree: _currentProfile?.isFree ?? true,
                   onAvailabilityChanged: _onAvailabilityChanged,
@@ -286,6 +294,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                   homeCity: _currentProfile?.city,
                 ),
               ),
+              SliverToBoxAdapter(child: _AvailableCountLabel(count: _availableCount)),
               const SliverToBoxAdapter(child: SizedBox(height: 12)),
               _buildBody(),
             ],
@@ -343,6 +352,46 @@ class _DashboardScreenState extends State<DashboardScreen>
           ),
         );
       }, childCount: _musicians.length),
+    );
+  }
+}
+
+/// Live "N músicos disponibles ahora" count — moved out of [DashboardHeader]
+/// to sit right below [SearchFilterBar]'s "Mostrando músicos cerca de..."
+/// caption, since both lines describe the list immediately underneath them.
+class _AvailableCountLabel extends StatelessWidget {
+  const _AvailableCountLabel({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final extension = theme.extension<AppThemeExtension>();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 4, 20, 0),
+      child: Row(
+        children: [
+          Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+              color: Color(0xFF22C55E),
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '$count Músico${count == 1 ? '' : 's'} '
+            'disponible${count == 1 ? '' : 's'} ahora',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: extension?.textSecondary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

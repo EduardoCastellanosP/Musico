@@ -1,6 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- image_picker's gallery pick on Android 13+ (API 33) uses the system
+         Photo Picker, which needs no runtime permission — these are only
+         the fallback for OEM ROMs/older devices that route through the
+         legacy MediaStore path instead. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
     <!-- Required to show the "¿Ya estás libre?" push and any other local
          notification on Android 13+ (API 33). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>

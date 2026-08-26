@@ -3,7 +3,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_compress/video_compress.dart';
-
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/constants/media_limits.dart';
 import '../core/constants/services.dart';
 import '../core/theme/app_theme.dart';
 import '../models/musician.dart';
@@ -26,6 +27,7 @@ import 'widgets/status/service_inventory_card.dart';
 import 'widgets/status/services_card.dart';
 import 'widgets/status/stats_panel.dart';
 import 'widgets/status/status_switch_card.dart';
+import 'auth_gate.dart';
 
 /// "Mi Estado" — where a musician controls their own availability. Every
 /// field here maps 1:1 to a column on their `profiles` row; saving performs
@@ -70,6 +72,7 @@ class _StatusScreenState extends State<StatusScreen>
   bool _uploadingVideo = false;
   bool _uploadingAvatar = false;
   bool _deletingAccount = false;
+  bool _signingOut = false;
 
   bool get _isMusician => _selectedServices.contains(MusicianServices.musician);
 
@@ -243,9 +246,9 @@ class _StatusScreenState extends State<StatusScreen>
       );
       if (!mounted) return;
       setState(() => _photos = [..._photos, photoUrl]);
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
-      _showMessage('No pudimos subir la foto. Intenta de nuevo.');
+      _showMessage('No pudimos subir la foto: $error');
     } finally {
       if (mounted) setState(() => _uploadingPhoto = false);
     }
@@ -273,11 +276,9 @@ class _StatusScreenState extends State<StatusScreen>
       setState(() {
         _profile = _profile?.copyWith(avatarUrl: avatarUrl);
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
-      _showMessage(
-        'No pudimos actualizar tu foto de perfil. Intenta de nuevo.',
-      );
+      _showMessage('No pudimos actualizar tu foto de perfil: $error');
     } finally {
       if (mounted) setState(() => _uploadingAvatar = false);
     }
@@ -324,21 +325,23 @@ class _StatusScreenState extends State<StatusScreen>
     );
     if (picked == null) return;
 
-    // --- NUEVO: Validar duración máxima de 60 segundos ---
+    final maxSeconds = MediaLimits.maxVideoDuration.inSeconds;
     try {
       final info = await VideoCompress.getMediaInfo(picked.path);
       final durationInSeconds = (info.duration ?? 0) / 1000;
-      
-      if (durationInSeconds > 60) {
-        _showMessage('El video es muy largo. Tiene que ser de máximo 60 segundos.');
+
+      if (durationInSeconds > maxSeconds) {
+        _showMessage(
+          'El video es muy largo. Tiene que ser de máximo ${maxSeconds ~/ 60} minutos.',
+        );
         return;
       }
     } catch (_) {
       // Si por alguna razón no se puede leer la info, dejamos continuar o manejamos el error
     }
-    // ----------------------------------------------------
 
     setState(() => _uploadingVideo = true);
+    _showMessage('Comprimiendo video, esto puede tardar un momento...');
     try {
       final info = await VideoCompress.compressVideo(
         picked.path,
@@ -350,6 +353,7 @@ class _StatusScreenState extends State<StatusScreen>
         throw StateError('No pudimos comprimir el video.');
       }
 
+      _showMessage('Subiendo video...');
       final bytes = await compressedFile.readAsBytes();
       final fileExt = picked.path.contains('.')
           ? picked.path.split('.').last
@@ -360,9 +364,10 @@ class _StatusScreenState extends State<StatusScreen>
       );
       if (!mounted) return;
       setState(() => _videos = [..._videos, video]);
-    } catch (_) {
+      _showMessage('Video agregado correctamente');
+    } catch (error) {
       if (!mounted) return;
-      _showMessage('No pudimos agregar el video. Intenta de nuevo.');
+      _showMessage('No pudimos agregar el video: $error');
     } finally {
       await VideoCompress.deleteAllCache();
       if (mounted) setState(() => _uploadingVideo = false);
@@ -397,6 +402,51 @@ class _StatusScreenState extends State<StatusScreen>
       if (!mounted) return;
       _showMessage('No pudimos eliminar el video. Intenta de nuevo.');
     }
+  }
+
+  /// "Cerrar sesión": clears the local Supabase session, then replaces the
+  /// entire navigation stack with a fresh [AuthGate] — [Navigator
+  /// .pushAndRemoveUntil] with `(route) => false` drops every pushed route
+  /// (including this one, and the original `AuthGate` the app started on),
+  /// so the physical back button can't return to a screen backed by a
+  /// session that no longer exists. Pushing [AuthGate] rather than
+  /// [LoginScreen] directly matters: `AuthGate` is what subscribes to
+  /// `onAuthStateChange`, so a bare `LoginScreen` here would leave nothing
+  /// listening for the *next* successful sign-in, stranding the user on
+  /// the login screen even after Supabase reports SIGNED_IN.
+  Future<void> _confirmSignOut() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('¿Cerrar sesión?'),
+        content: const Text('Podrás volver a iniciar sesión cuando quieras.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Cerrar sesión'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _signingOut = true);
+    try {
+      await _authService.signOut();
+    } catch (_) {
+      // The local session is cleared by the SDK even if the remote
+      // sign-out call fails (e.g. offline) — proceed to LoginScreen either
+      // way, same rationale as _confirmDeleteAccount's sign-out fallback.
+    }
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const AuthGate()),
+      (route) => false,
+    );
   }
 
   /// "Eliminar cuenta": confirms via [AlertDialog], then wipes Storage
@@ -582,6 +632,11 @@ class _StatusScreenState extends State<StatusScreen>
             : _profile == null
             ? const Center(child: Text('No encontramos tu perfil.'))
             : ListView(
+                // Keyed so the scroll offset survives rebuilds triggered by
+                // picking a photo/video (image_picker backgrounds the app
+                // briefly, and the ensuing setState calls would otherwise
+                // reset the Scrollable to a fresh position).
+                key: const PageStorageKey('status_screen_list'),
                 // Extra bottom padding keeps the last cards (Galería,
                 // Estadísticas) from ending up hidden behind the floating
                 // `_SaveBar` once the user scrolls all the way down.
@@ -700,6 +755,27 @@ class _StatusScreenState extends State<StatusScreen>
                   const SizedBox(height: 12),
                   StatsPanel(stats: _stats, rating: _profile!.rating),
                   const SizedBox(height: 28),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _signingOut ? null : _confirmSignOut,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                      icon: _signingOut
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2.5),
+                            )
+                          : const Icon(Icons.logout_rounded),
+                      label: const Text(
+                        'Cerrar sesión',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
                   Text(
                     'Zona de peligro',
                     style: theme.textTheme.titleMedium?.copyWith(

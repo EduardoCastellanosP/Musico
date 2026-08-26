@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'dashboard_screen.dart';
+import 'home_shell.dart';
 import 'login_screen.dart';
 
-/// Root routing widget: shows [DashboardScreen] while a Supabase session is
+/// Root routing widget: shows [HomeShell] while a Supabase session is
 /// active, [LoginScreen] otherwise. Rebuilds instantly on every auth change
 /// (OTP verification, Google OAuth callback, sign-out) via
 /// [GoTrueClient.onAuthStateChange], so no manual navigation is needed once
@@ -40,7 +40,7 @@ class _AuthGateState extends State<AuthGate> {
         final session = snapshot.data?.session ?? auth.currentSession;
         if (session != null) {
           _oauthError = null;
-          return const DashboardScreen();
+          return const HomeShell();
         }
         if (_oauthError != null) {
           return _OAuthErrorScreen(

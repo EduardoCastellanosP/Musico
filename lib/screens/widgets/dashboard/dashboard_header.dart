@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_notifier.dart';
+import '../../../models/musician_stats.dart';
 import 'availability_switch.dart';
 
 const List<String> _weekdayNames = [
@@ -47,14 +48,14 @@ class DashboardHeader extends StatelessWidget {
   const DashboardHeader({
     super.key,
     required this.greetingName,
-    required this.availableCount,
+    required this.stats,
     required this.onSettingsTap,
     required this.isFree,
     required this.onAvailabilityChanged,
   });
 
   final String? greetingName;
-  final int availableCount;
+  final MusicianStats stats;
   final VoidCallback onSettingsTap;
 
   /// The logged-in musician's own current availability, and the callback
@@ -99,7 +100,7 @@ class DashboardHeader extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
               child: _HeaderContent(
                 greetingName: greetingName,
-                availableCount: availableCount,
+                stats: stats,
                 onSettingsTap: onSettingsTap,
                 isFree: isFree,
                 onAvailabilityChanged: onAvailabilityChanged,
@@ -118,14 +119,14 @@ class DashboardHeader extends StatelessWidget {
 class _HeaderContent extends StatelessWidget {
   const _HeaderContent({
     required this.greetingName,
-    required this.availableCount,
+    required this.stats,
     required this.onSettingsTap,
     required this.isFree,
     required this.onAvailabilityChanged,
   });
 
   final String? greetingName;
-  final int availableCount;
+  final MusicianStats stats;
   final VoidCallback onSettingsTap;
   final bool isFree;
   final ValueChanged<bool> onAvailabilityChanged;
@@ -181,26 +182,7 @@ class _HeaderContent extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 10),
-        Row(
-          children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: const BoxDecoration(
-                color: Color(0xFF22C55E),
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              '$availableCount Músico${availableCount == 1 ? '' : 's'} '
-              'disponible${availableCount == 1 ? '' : 's'} ahora',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: Colors.white.withValues(alpha: 0.85),
-              ),
-            ),
-          ],
-        ),
+        _FollowersAndLikesRow(stats: stats),
         const SizedBox(height: 20),
         AvailabilitySwitch(isFree: isFree, onChanged: onAvailabilityChanged),
       ],
@@ -229,6 +211,36 @@ class _CircleIconButton extends StatelessWidget {
           child: Icon(icon, color: Colors.white, size: 20),
         ),
       ),
+    );
+  }
+}
+
+/// "N seguidores · N me gusta", sourced from the same `musician_follows`/
+/// `video_likes` counts [MusicianRepository.fetchContactStats] returns —
+/// sits between the greeting name and the Libre/Ocupado switch.
+class _FollowersAndLikesRow extends StatelessWidget {
+  const _FollowersAndLikesRow({required this.stats});
+
+  final MusicianStats stats;
+
+  @override
+  Widget build(BuildContext context) {
+    const textStyle = TextStyle(
+      color: Colors.white70,
+      fontWeight: FontWeight.w600,
+      fontSize: 13,
+    );
+
+    return Row(
+      children: [
+        const Icon(Icons.people_alt_rounded, size: 15, color: Colors.white70),
+        const SizedBox(width: 4),
+        Text('${stats.followersCount} seguidores', style: textStyle),
+        const SizedBox(width: 14),
+        const Icon(Icons.favorite_rounded, size: 15, color: Colors.white70),
+        const SizedBox(width: 4),
+        Text('${stats.totalVideoLikes} me gusta', style: textStyle),
+      ],
     );
   }
 }

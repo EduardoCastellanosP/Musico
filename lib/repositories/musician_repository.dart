@@ -6,6 +6,7 @@ import '../core/constants/city_zones.dart';
 import '../models/musician.dart';
 import '../models/musician_stats.dart';
 import '../models/musician_video.dart';
+import '../models/video_feed_item.dart';
 
 const String _photosBucket = 'musician-photos';
 const String _avatarsBucket = 'avatars';
@@ -16,6 +17,12 @@ const String _videosBucket = 'musician-videos';
 /// [fetchCurrentProfile] so the two selects can't drift out of sync.
 const String _videoColumns =
     'id, musician_id, video_url, views_count, created_at';
+
+/// `profiles` columns the Reels-style feed needs for its overlay/contact
+/// buttons — a small subset of what [Musician.fromJson] parses, since the
+/// feed never shows a full profile card.
+const String _feedProfileColumns =
+    'full_name, avatar_url, city, phone, is_free, instruments, genres, services';
 
 /// Every read/write the app performs against the `profiles` and
 /// `contact_events` tables goes through here — UI widgets never touch the
@@ -129,6 +136,32 @@ class MusicianRepository {
     return Musician.fromJson(row);
   }
 
+  /// Global feed for [VideoFeedScreen]: the most recent uploads across every
+  /// musician, newest first, each carrying just enough of its owner's
+  /// profile (via the `profiles` embed — the reverse direction of
+  /// [fetchMusicians]'s `musician_videos` embed) to render the overlay and
+  /// contact buttons. [before] pages backward from that video's upload
+  /// time, for infinite scroll as the viewer nears the end of [_items].
+  Future<List<VideoFeedItem>> fetchVideoFeed({
+    int limit = 8,
+    DateTime? before,
+  }) async {
+    PostgrestFilterBuilder<PostgrestList> query = _client
+        .from('musician_videos')
+        .select();
+
+    if (before != null) {
+      query = query.lt('created_at', before.toIso8601String());
+    }
+
+    final rows = await query
+        .select('$_videoColumns, profiles($_feedProfileColumns)')
+        .order('created_at', ascending: false)
+        .limit(limit);
+
+    return rows.map(VideoFeedItem.fromJson).toList();
+  }
+
   /// Atomically updates the logged-in musician's availability: the
   /// Libre/Ocupado switch, their current "ocupado" time window, and either
   /// the status message shown on the dashboard card or the free-text
@@ -232,27 +265,43 @@ class MusicianRepository {
         .map((rows) => rows.where((row) => row['is_free'] == true).length);
   }
 
-  /// Contact counters for the "Mi Estado" stats panel.
+  /// Contact/followers/likes counters for the "Mi Estado" header and stats
+  /// panel — four independent counts fetched in parallel via [Future.wait]
+  /// rather than sequentially, since none of them depend on each other.
   Future<MusicianStats> fetchContactStats(String musicianId) async {
     final now = DateTime.now();
     final startOfDay = DateTime(now.year, now.month, now.day);
     final startOfMonth = DateTime(now.year, now.month, 1);
 
-    final todayRows = await _client
-        .from('contact_events')
-        .select('id')
-        .eq('musician_id', musicianId)
-        .gte('created_at', startOfDay.toIso8601String());
-
-    final monthRows = await _client
-        .from('contact_events')
-        .select('id')
-        .eq('musician_id', musicianId)
-        .gte('created_at', startOfMonth.toIso8601String());
+    final results = await Future.wait([
+      _client
+          .from('contact_events')
+          .select('id')
+          .eq('musician_id', musicianId)
+          .gte('created_at', startOfDay.toIso8601String()),
+      _client
+          .from('contact_events')
+          .select('id')
+          .eq('musician_id', musicianId)
+          .gte('created_at', startOfMonth.toIso8601String()),
+      _client
+          .from('musician_follows')
+          .select('follower_id')
+          .eq('musician_id', musicianId),
+      // `!inner` makes the embedded `.eq()` actually restrict the outer
+      // `video_likes` rows returned, instead of just filtering which
+      // `musician_videos` fields come back per row.
+      _client
+          .from('video_likes')
+          .select('video_id, musician_videos!inner(musician_id)')
+          .eq('musician_videos.musician_id', musicianId),
+    ]);
 
     return MusicianStats(
-      contactsToday: todayRows.length,
-      contactsThisMonth: monthRows.length,
+      contactsToday: results[0].length,
+      contactsThisMonth: results[1].length,
+      followersCount: results[2].length,
+      totalVideoLikes: results[3].length,
     );
   }
 
@@ -437,6 +486,79 @@ class MusicianRepository {
     if (objects.isEmpty) return;
     final paths = objects.map((object) => '$uid/${object.name}').toList();
     await _client.storage.from(bucket).remove(paths);
+  }
+
+  /// Which of [videoIds] the current viewer already liked, for
+  /// [VideoFeedScreen]'s initial heart state. Empty (not an error) when
+  /// signed out or [videoIds] is empty — nothing to look up either way.
+  Future<Set<String>> fetchLikedVideoIds(List<String> videoIds) async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null || videoIds.isEmpty) return {};
+    final rows = await _client
+        .from('video_likes')
+        .select('video_id')
+        .eq('user_id', uid)
+        .inFilter('video_id', videoIds);
+    return rows.map((row) => row['video_id'] as String).toSet();
+  }
+
+  /// Records a like. Ignores a duplicate-key error from double-tapping the
+  /// heart before the first insert lands — the row already existing is the
+  /// desired end state either way.
+  Future<void> likeVideo(String videoId) async {
+    final uid = _requireUserId();
+    try {
+      await _client.from('video_likes').insert({
+        'video_id': videoId,
+        'user_id': uid,
+      });
+    } on PostgrestException catch (e) {
+      if (e.code != '23505') rethrow;
+    }
+  }
+
+  Future<void> unlikeVideo(String videoId) async {
+    final uid = _requireUserId();
+    await _client
+        .from('video_likes')
+        .delete()
+        .eq('video_id', videoId)
+        .eq('user_id', uid);
+  }
+
+  /// Which of [musicianIds] the current viewer already follows, for
+  /// [VideoFeedScreen]'s initial "Seguir"/"Siguiendo" state.
+  Future<Set<String>> fetchFollowedMusicianIds(List<String> musicianIds) async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null || musicianIds.isEmpty) return {};
+    final rows = await _client
+        .from('musician_follows')
+        .select('musician_id')
+        .eq('follower_id', uid)
+        .inFilter('musician_id', musicianIds);
+    return rows.map((row) => row['musician_id'] as String).toSet();
+  }
+
+  Future<void> followMusician(String musicianId) async {
+    final uid = _requireUserId();
+    if (uid == musicianId) return;
+    try {
+      await _client.from('musician_follows').insert({
+        'follower_id': uid,
+        'musician_id': musicianId,
+      });
+    } on PostgrestException catch (e) {
+      if (e.code != '23505') rethrow;
+    }
+  }
+
+  Future<void> unfollowMusician(String musicianId) async {
+    final uid = _requireUserId();
+    await _client
+        .from('musician_follows')
+        .delete()
+        .eq('musician_id', musicianId)
+        .eq('follower_id', uid);
   }
 
   String _requireUserId() {

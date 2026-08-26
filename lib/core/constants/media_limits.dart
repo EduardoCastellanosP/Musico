@@ -4,5 +4,8 @@
 /// (so the limit holds even if a client skips this check).
 abstract final class MediaLimits {
   static const int maxPhotos = 10;
-  static const int maxVideos = 3;
+  static const int maxVideos = 5;
+
+  /// Longest a single portfolio video may run before compression/upload.
+  static const Duration maxVideoDuration = Duration(minutes: 3);
 }

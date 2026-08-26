@@ -31,6 +31,7 @@ class Musician {
     required this.busyUntil,
     required this.photos,
     required this.videos,
+    required this.lastMediaAt,
   });
 
   factory Musician.fromJson(Map<String, dynamic> json) {
@@ -60,6 +61,9 @@ class Musician {
           : null,
       photos: _stringList(json['photos']),
       videos: _videoList(json['musician_videos']),
+      lastMediaAt: json['last_media_at'] != null
+          ? DateTime.tryParse(json['last_media_at'] as String)
+          : null,
     );
   }
 
@@ -140,7 +144,21 @@ class Musician {
   /// [MediaLimits.maxVideos] by a DB trigger.
   final List<MusicianVideo> videos;
 
+  /// When the musician last uploaded a portfolio photo or video — powers
+  /// the dashboard card's "story ring" (see [recentlyUploaded]). Null when
+  /// they've never uploaded anything.
+  final DateTime? lastMediaAt;
+
   bool get canAddMorePhotos => photos.length < MediaLimits.maxPhotos;
+
+  /// True within 48h of the musician's last portfolio upload — the window
+  /// the dashboard card highlights with a gradient ring, mirroring how
+  /// WhatsApp/Instagram stories fade after a day or two.
+  bool get recentlyUploaded {
+    final at = lastMediaAt;
+    if (at == null) return false;
+    return DateTime.now().difference(at).inHours < 48;
+  }
 
   bool get canAddMoreVideos => videos.length < MediaLimits.maxVideos;
 
@@ -170,6 +188,7 @@ class Musician {
     bool clearBusyUntil = false,
     List<String>? photos,
     List<MusicianVideo>? videos,
+    DateTime? lastMediaAt,
   }) {
     return Musician(
       id: id,
@@ -193,6 +212,7 @@ class Musician {
       busyUntil: clearBusyUntil ? null : (busyUntil ?? this.busyUntil),
       photos: photos ?? this.photos,
       videos: videos ?? this.videos,
+      lastMediaAt: lastMediaAt ?? this.lastMediaAt,
     );
   }
 
