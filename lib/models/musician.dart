@@ -23,6 +23,7 @@ class Musician {
     required this.availableTo,
     required this.phone,
     required this.avatarUrl,
+    required this.coverUrl,
     required this.genres,
     required this.services,
     required this.serviceDescription,
@@ -51,6 +52,7 @@ class Musician {
       availableTo: json['available_to'] as String? ?? '22:00',
       phone: json['phone'] as String? ?? '',
       avatarUrl: json['avatar_url'] as String?,
+      coverUrl: json['cover_url'] as String?,
       genres: _stringList(json['genres']),
       services: _stringList(json['services']),
       serviceDescription: json['service_description'] as String? ?? '',
@@ -109,6 +111,11 @@ class Musician {
 
   final String phone;
   final String? avatarUrl;
+
+  /// Public header/background photo shown behind the avatar on
+  /// [MusicianDetailScreen]/[ProfileHeader]. Null falls back to a themed
+  /// gradient placeholder — most musicians won't set one explicitly.
+  final String? coverUrl;
 
   /// Musical genres this musician performs. Empty when they only offer a
   /// technical [services].
@@ -175,6 +182,7 @@ class Musician {
     int? experienceYears,
     String? phone,
     String? avatarUrl,
+    String? coverUrl,
     List<String>? genres,
     List<String>? services,
     String? serviceDescription,
@@ -204,6 +212,7 @@ class Musician {
       availableTo: availableTo ?? this.availableTo,
       phone: phone ?? this.phone,
       avatarUrl: avatarUrl ?? this.avatarUrl,
+      coverUrl: coverUrl ?? this.coverUrl,
       genres: genres ?? this.genres,
       services: services ?? this.services,
       serviceDescription: serviceDescription ?? this.serviceDescription,

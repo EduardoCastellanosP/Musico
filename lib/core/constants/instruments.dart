@@ -18,6 +18,11 @@ abstract final class VallenatoInstruments {
     'Saxofonista',
     'Trombón',
     'Requintista',
+    'Violochelo',
+    'Violinista',
+    'Percusionista',
+    'Contrabajista',
+    'Guirero',
     
   ];
 }

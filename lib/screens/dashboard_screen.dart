@@ -41,6 +41,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   String? _selectedInstrument;
   String? _selectedGenre;
   String? _selectedService;
+  String? _selectedCityFilter;
   bool _onlyFree = false;
   // Requirement 4 default: "Cercanías" (near the musician's own city). The
   // dashboard's "Toda Colombia" switch flips this to search nationwide.
@@ -133,14 +134,19 @@ class _DashboardScreenState extends State<DashboardScreen>
   Future<void> _loadMusicians() async {
     setState(() => _loading = true);
     try {
+      // An explicit city filter (e.g. "Valledupar") overrides the "De mi
+      // ciudad"/"Toda Colombia" toggle — it's a more specific choice than
+      // either, but reuses the exact same CityZones-widened `nearCity`
+      // matching underneath, so a musician in a nearby commuter town still
+      // shows up instead of only exact-city matches.
       final musicians = await _repository.fetchMusicians(
         instrument: _selectedInstrument,
         genre: _selectedGenre,
         service: _selectedService,
         onlyFree: _onlyFree,
         search: _search,
-        nearCity: _currentProfile?.city,
-        searchNationwide: _searchNationwide,
+        nearCity: _selectedCityFilter ?? _currentProfile?.city,
+        searchNationwide: _selectedCityFilter == null && _searchNationwide,
       );
       if (!mounted) return;
       setState(() {
@@ -177,6 +183,11 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   void _onServiceSelected(String? service) {
     setState(() => _selectedService = service);
+    _loadMusicians();
+  }
+
+  void _onCityFilterSelected(String? city) {
+    setState(() => _selectedCityFilter = city);
     _loadMusicians();
   }
 
@@ -287,6 +298,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                   onInstrumentSelected: _onInstrumentSelected,
                   selectedService: _selectedService,
                   onServiceSelected: _onServiceSelected,
+                  selectedCityFilter: _selectedCityFilter,
+                  onCityFilterSelected: _onCityFilterSelected,
                   onlyFree: _onlyFree,
                   onOnlyFreeChanged: _onOnlyFreeChanged,
                   searchNationwide: _searchNationwide,

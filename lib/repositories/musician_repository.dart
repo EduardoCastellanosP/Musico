@@ -136,6 +136,20 @@ class MusicianRepository {
     return Musician.fromJson(row);
   }
 
+  /// Any musician's full profile by id — used by [VideoFeedScreen] to open
+  /// [MusicianDetailScreen] when the viewer taps a video's profile row
+  /// (that screen needs the full [Musician], not [VideoFeedItem]'s smaller
+  /// subset of columns).
+  Future<Musician?> fetchMusicianById(String id) async {
+    final row = await _client
+        .from('profiles')
+        .select('*, musician_videos($_videoColumns)')
+        .eq('id', id)
+        .maybeSingle();
+    if (row == null) return null;
+    return Musician.fromJson(row);
+  }
+
   /// Global feed for [VideoFeedScreen]: the most recent uploads across every
   /// musician, newest first, each carrying just enough of its owner's
   /// profile (via the `profiles` embed — the reverse direction of
@@ -160,6 +174,21 @@ class MusicianRepository {
         .limit(limit);
 
     return rows.map(VideoFeedItem.fromJson).toList();
+  }
+
+  /// Whether [phone] (already in `+57XXXXXXXXXX` form) is already on some
+  /// *other* profile — called from [StatusScreen._save] before writing, so
+  /// two musicians never end up sharing one WhatsApp contact number.
+  /// `excludingId` is the logged-in musician's own id, so saving with their
+  /// own unchanged number never flags itself as a duplicate.
+  Future<bool> isPhoneTaken(String phone, {required String excludingId}) async {
+    final rows = await _client
+        .from('profiles')
+        .select('id')
+        .eq('phone', phone)
+        .neq('id', excludingId)
+        .limit(1);
+    return rows.isNotEmpty;
   }
 
   /// Atomically updates the logged-in musician's availability: the
@@ -439,6 +468,34 @@ class MusicianRepository {
         .update({'avatar_url': avatarUrl})
         .eq('id', uid);
     return avatarUrl;
+  }
+
+  /// Uploads [bytes] to the `avatars` bucket (same bucket as [updateAvatar],
+  /// a `cover-` filename prefix instead of `{uid}-`) and stores the
+  /// resulting public URL as the logged-in musician's `cover_url` — the
+  /// background photo behind the avatar on [ProfileHeader].
+  Future<String> updateCover({
+    required Uint8List bytes,
+    required String fileExt,
+  }) async {
+    final uid = _requireUserId();
+    final fileName = 'cover-$uid-${DateTime.now().millisecondsSinceEpoch}.$fileExt';
+    final path = '$uid/$fileName';
+
+    await _client.storage
+        .from(_avatarsBucket)
+        .uploadBinary(
+          path,
+          bytes,
+          fileOptions: const FileOptions(upsert: true),
+        );
+    final coverUrl = _client.storage.from(_avatarsBucket).getPublicUrl(path);
+
+    await _client
+        .from('profiles')
+        .update({'cover_url': coverUrl})
+        .eq('id', uid);
+    return coverUrl;
   }
 
   /// Permanently deletes the logged-in musician's account: their portfolio

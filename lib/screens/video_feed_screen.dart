@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 import '../core/theme/app_theme.dart';
 import '../models/video_feed_item.dart';
 import '../repositories/musician_repository.dart';
+import 'musician_detail_screen.dart';
 
 /// Reels/TikTok-style vertical feed of every musician's uploaded videos,
 /// newest first. Only the on-screen page's [VideoPlayerController] is ever
@@ -21,7 +22,12 @@ import '../repositories/musician_repository.dart';
 /// position/feed scroll survive tab switches) but does nothing on its own
 /// to stop an off-screen video's audio.
 class VideoFeedScreen extends StatefulWidget {
-  const VideoFeedScreen({super.key});
+  const VideoFeedScreen({super.key, required this.onBack});
+
+  /// Called when the user taps the back arrow overlay — [HomeShell] wires
+  /// this to switch back to the Directorio tab (and bring its bottom nav
+  /// bar back), since this screen renders without one of its own.
+  final VoidCallback onBack;
 
   @override
   State<VideoFeedScreen> createState() => VideoFeedScreenState();
@@ -175,6 +181,20 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
     unawaited(_repository.incrementVideoView(_items[index].video.id));
   }
 
+  /// Opens the full public profile for [item]'s musician — pauses the
+  /// video first and resumes it on return, the same "don't leave audio
+  /// playing under a screen the user can't see" concern [pauseCurrent]/
+  /// [resumeCurrent] already handle for tab switches.
+  Future<void> _openProfile(VideoFeedItem item) async {
+    final musician = await _repository.fetchMusicianById(item.musicianId);
+    if (!mounted || musician == null) return;
+    pauseCurrent();
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => MusicianDetailScreen(musician: musician)),
+    );
+    if (mounted) resumeCurrent();
+  }
+
   Future<void> _contactWhatsApp(VideoFeedItem item) async {
     if (!item.hasPhone) return;
     final launched = await launchUrl(
@@ -238,61 +258,93 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildBody() {
     if (_loading) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(
-          child: CircularProgressIndicator(color: AppColors.accent),
-        ),
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.accent),
       );
     }
 
     if (_error != null) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(
-          child: Text(_error!, style: const TextStyle(color: Colors.white70)),
-        ),
+      return Center(
+        child: Text(_error!, style: const TextStyle(color: Colors.white70)),
       );
     }
 
     if (_items.isEmpty) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'Todavía no hay videos en el feed. Sube el tuyo desde "Mi Estado".',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70),
-            ),
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'Todavía no hay videos en el feed. Sube el tuyo desde "Mi Estado".',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white70),
           ),
         ),
       );
     }
 
+    return PageView.builder(
+      controller: _pageController,
+      scrollDirection: Axis.vertical,
+      itemCount: _items.length,
+      onPageChanged: _onPageChanged,
+      itemBuilder: (context, index) {
+        final item = _items[index];
+        return _VideoFeedPage(
+          item: item,
+          controller: _controllers[index],
+          isLiked: _likedVideoIds.contains(item.video.id),
+          isFollowing: _followedMusicianIds.contains(item.musicianId),
+          onLike: () => _toggleLike(item),
+          onFollow: () => _toggleFollow(item),
+          onContact: () => _contactWhatsApp(item),
+          onTapProfile: () => _openProfile(item),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: PageView.builder(
-        controller: _pageController,
-        scrollDirection: Axis.vertical,
-        itemCount: _items.length,
-        onPageChanged: _onPageChanged,
-        itemBuilder: (context, index) {
-          final item = _items[index];
-          return _VideoFeedPage(
-            item: item,
-            controller: _controllers[index],
-            isLiked: _likedVideoIds.contains(item.video.id),
-            isFollowing: _followedMusicianIds.contains(item.musicianId),
-            onLike: () => _toggleLike(item),
-            onFollow: () => _toggleFollow(item),
-            onContact: () => _contactWhatsApp(item),
-          );
-        },
+      body: Stack(
+        children: [
+          _buildBody(),
+          // Returns to the Directorio tab — this screen has no
+          // NavigationBar/AppBar of its own (full-bleed video, per spec),
+          // so it needs its own way back rather than relying on the
+          // system back gesture, which would exit the app instead.
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: _BackButton(onTap: widget.onBack),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BackButton extends StatelessWidget {
+  const _BackButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black45,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: const Padding(
+          padding: EdgeInsets.all(8),
+          child: Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
+        ),
       ),
     );
   }
@@ -307,6 +359,7 @@ class _VideoFeedPage extends StatelessWidget {
     required this.onLike,
     required this.onFollow,
     required this.onContact,
+    required this.onTapProfile,
   });
 
   final VideoFeedItem item;
@@ -316,6 +369,7 @@ class _VideoFeedPage extends StatelessWidget {
   final VoidCallback onLike;
   final VoidCallback onFollow;
   final VoidCallback onContact;
+  final VoidCallback onTapProfile;
 
   void _togglePlay() {
     final c = controller;
@@ -386,6 +440,7 @@ class _VideoFeedPage extends StatelessWidget {
                 onLike: onLike,
                 onFollow: onFollow,
                 onContact: onContact,
+                onTapProfile: onTapProfile,
               ),
             ),
           ),
@@ -405,6 +460,7 @@ class _VideoFeedOverlay extends StatelessWidget {
     required this.onLike,
     required this.onFollow,
     required this.onContact,
+    required this.onTapProfile,
   });
 
   final VideoFeedItem item;
@@ -413,6 +469,7 @@ class _VideoFeedOverlay extends StatelessWidget {
   final VoidCallback onLike;
   final VoidCallback onFollow;
   final VoidCallback onContact;
+  final VoidCallback onTapProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -421,7 +478,7 @@ class _VideoFeedOverlay extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _ProfileRow(item: item),
+          _ProfileRow(item: item, onTap: onTapProfile),
           const SizedBox(height: 14),
           Row(
             children: [
@@ -474,16 +531,23 @@ class _VideoFeedOverlay extends StatelessWidget {
 }
 
 class _ProfileRow extends StatelessWidget {
-  const _ProfileRow({required this.item});
+  const _ProfileRow({required this.item, required this.onTap});
 
   final VideoFeedItem item;
+
+  /// Opens the musician's full profile ([MusicianDetailScreen]) — see
+  /// [VideoFeedScreenState._openProfile].
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final avatarUrl = item.avatarUrl;
     final primaryGenre = item.genres.isNotEmpty ? item.genres.first : null;
 
-    return Row(
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
@@ -562,6 +626,7 @@ class _ProfileRow extends StatelessWidget {
           ),
         ),
       ],
+      ),
     );
   }
 }

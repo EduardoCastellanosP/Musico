@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/services.dart';
 import '../../../core/theme/app_theme.dart';
-import 'multi_select_chip_field.dart';
+import 'multi_select_search_field.dart';
 
 /// "Servicios" — lets a profile offer more than one thing at once (e.g.
 /// "Músico" and "Sonido"). Selecting it drives which sections
@@ -48,10 +48,12 @@ class ServicesCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          MultiSelectChipField(
+          MultiSelectSearchField(
             options: MusicianServices.all,
             selected: selectedServices,
             onChanged: onChanged,
+            addLabel: 'Agregar servicio',
+            searchHint: 'Busca un servicio...',
           ),
         ],
       ),

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/genres.dart';
 import '../../../core/constants/instruments.dart';
 import '../../../core/theme/app_theme.dart';
-import 'multi_select_chip_field.dart';
+import 'multi_select_search_field.dart';
 
 /// "Instrumentos" and "Género musical" — multi-selection chip pickers, only
 /// shown while the musician offers the "Músico" service (see
@@ -60,10 +60,12 @@ class MusicianSkillsCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          MultiSelectChipField(
+          MultiSelectSearchField(
             options: VallenatoInstruments.all,
             selected: selectedInstruments,
             onChanged: onInstrumentsChanged,
+            addLabel: 'Agregar instrumento',
+            searchHint: 'Busca un instrumento...',
           ),
           const SizedBox(height: 18),
           Text(
@@ -71,13 +73,16 @@ class MusicianSkillsCard extends StatelessWidget {
             style: theme.textTheme.labelLarge?.copyWith(
               color: extension?.textSecondary,
               fontWeight: FontWeight.w600,
+              
             ),
           ),
           const SizedBox(height: 8),
-          MultiSelectChipField(
+          MultiSelectSearchField(
             options: MusicGenres.all,
             selected: selectedGenres,
             onChanged: onGenresChanged,
+            addLabel: 'Agregar género',
+            searchHint: 'Busca un género...',
           ),
         ],
       ),

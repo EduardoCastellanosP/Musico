@@ -21,7 +21,7 @@ import 'widgets/status/media_manager_card.dart';
 import 'widgets/status/message_field_card.dart';
 import 'widgets/status/musician_skills_card.dart';
 import 'profile_preview_screen.dart';
-import 'widgets/status/profile_avatar_editor.dart';
+import 'widgets/profile/profile_header.dart';
 import 'widgets/status/profile_info_card.dart';
 import 'widgets/status/service_inventory_card.dart';
 import 'widgets/status/services_card.dart';
@@ -71,6 +71,7 @@ class _StatusScreenState extends State<StatusScreen>
   bool _uploadingPhoto = false;
   bool _uploadingVideo = false;
   bool _uploadingAvatar = false;
+  bool _uploadingCover = false;
   bool _deletingAccount = false;
   bool _signingOut = false;
 
@@ -281,6 +282,63 @@ class _StatusScreenState extends State<StatusScreen>
       _showMessage('No pudimos actualizar tu foto de perfil: $error');
     } finally {
       if (mounted) setState(() => _uploadingAvatar = false);
+    }
+  }
+
+  /// Same pick/upload shape as [_updateProfilePicture], for the header's
+  /// background photo ([ProfileHeader.backgroundImageUrl]) instead of the
+  /// avatar. Offers gallery or camera, matching [_addPhoto]'s source sheet.
+  Future<void> _updateCoverPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Elegir de la galería'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Tomar una foto'),
+              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    final image = await _imagePicker.pickImage(
+      source: source,
+      maxWidth: 1600,
+      imageQuality: 85,
+    );
+    if (image == null) return;
+
+    setState(() => _uploadingCover = true);
+    try {
+      final bytes = await image.readAsBytes();
+      final fileExt = image.path.contains('.')
+          ? image.path.split('.').last
+          : 'jpg';
+      final coverUrl = await _repository.updateCover(
+        bytes: bytes,
+        fileExt: fileExt.toLowerCase(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _profile = _profile?.copyWith(coverUrl: coverUrl);
+      });
+    } catch (error) {
+      if (!mounted) return;
+      _showMessage('No pudimos actualizar tu foto de fondo: $error');
+    } finally {
+      if (mounted) setState(() => _uploadingCover = false);
     }
   }
 
@@ -539,6 +597,14 @@ class _StatusScreenState extends State<StatusScreen>
           int.parse(_experienceYearsController.text.trim());
       final phoneDigits = _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
       final phone = '+57$phoneDigits';
+
+      if (await _repository.isPhoneTaken(phone, excludingId: _profile!.id)) {
+        if (!mounted) return;
+        setState(() => _saving = false);
+        _showMessage('Este número de WhatsApp ya está registrado en otro perfil.');
+        return;
+      }
+
       final statusMessage = _messageController.text.trim();
       final availabilityNote = _availabilityNoteController.text.trim();
       final serviceDescription = _serviceDescriptionController.text.trim();
@@ -661,18 +727,18 @@ class _StatusScreenState extends State<StatusScreen>
                       ),
                     ],
                   ),
-                  Text(
-                    'Perfil de ${_profile!.fullName}',
-                    style: theme.textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-                  ProfileAvatarEditor(
+                  // Doubles as a live preview of the public profile
+                  // ([MusicianDetailScreen] renders the exact same
+                  // [ProfileHeader]) — with the cover/avatar edit
+                  // affordances wired in here, since this is the only
+                  // screen where editing your own profile makes sense.
+                  ProfileHeader(
                     musician: _profile!,
-                    uploading: _uploadingAvatar,
-                    onTap: _updateProfilePicture,
+                    backgroundImageUrl: _profile!.coverUrl,
+                    onEditCover: _updateCoverPhoto,
+                    uploadingCover: _uploadingCover,
+                    onEditAvatar: _updateProfilePicture,
+                    uploadingAvatar: _uploadingAvatar,
                   ),
                   const SizedBox(height: 16),
                   ProfileInfoCard(

@@ -29,7 +29,9 @@ class _HomeShellState extends State<HomeShell> {
   // changes, instead of threading a `visible` flag through props.
   final _videoFeedKey = GlobalKey<VideoFeedScreenState>();
 
-  void _onDestinationSelected(int index) {
+  void _onDestinationSelected(int index) => _goToTab(index);
+
+  void _goToTab(int index) {
     if (index == _index) return;
     if (_index == _videosTabIndex) {
       _videoFeedKey.currentState?.pauseCurrent();
@@ -41,53 +43,63 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    final onVideosTab = _index == _videosTabIndex;
+
     return Scaffold(
       body: IndexedStack(
         index: _index,
         children: [
           const DashboardScreen(),
-          VideoFeedScreen(key: _videoFeedKey),
+          VideoFeedScreen(
+            key: _videoFeedKey,
+            onBack: () => _goToTab(0),
+          ),
         ],
       ),
-      bottomNavigationBar: NavigationBarTheme(
-        data: NavigationBarThemeData(
-          backgroundColor: const Color(0xFF0B1120),
-          indicatorColor: const Color(0xFF8B5CF6).withValues(alpha: 0.28),
-          indicatorShape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          labelTextStyle: WidgetStateProperty.resolveWith((states) {
-            final selected = states.contains(WidgetState.selected);
-            return TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: selected ? const Color(0xFFC4B5FD) : Colors.white60,
-            );
-          }),
-          iconTheme: WidgetStateProperty.resolveWith((states) {
-            final selected = states.contains(WidgetState.selected);
-            return IconThemeData(
-              color: selected ? Colors.white : Colors.white60,
-            );
-          }),
-        ),
-        child: NavigationBar(
-          selectedIndex: _index,
-          onDestinationSelected: _onDestinationSelected,
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.people_alt_outlined),
-              selectedIcon: Icon(Icons.people_alt_rounded),
-              label: 'Directorio',
+      // Hidden on the Videos tab so the feed renders truly full-screen
+      // (TikTok/Reels-style) — VideoFeedScreen's own back arrow is what
+      // brings the user (and this bar) back to Directorio.
+      bottomNavigationBar: onVideosTab
+          ? null
+          : NavigationBarTheme(
+              data: NavigationBarThemeData(
+                backgroundColor: const Color(0xFF0B1120),
+                indicatorColor: const Color(0xFF8B5CF6).withValues(alpha: 0.28),
+                indicatorShape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                labelTextStyle: WidgetStateProperty.resolveWith((states) {
+                  final selected = states.contains(WidgetState.selected);
+                  return TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: selected ? const Color(0xFFC4B5FD) : Colors.white60,
+                  );
+                }),
+                iconTheme: WidgetStateProperty.resolveWith((states) {
+                  final selected = states.contains(WidgetState.selected);
+                  return IconThemeData(
+                    color: selected ? Colors.white : Colors.white60,
+                  );
+                }),
+              ),
+              child: NavigationBar(
+                selectedIndex: _index,
+                onDestinationSelected: _onDestinationSelected,
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.people_alt_outlined),
+                    selectedIcon: Icon(Icons.people_alt_rounded),
+                    label: 'Directorio',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.video_collection_outlined),
+                    selectedIcon: Icon(Icons.video_collection_rounded),
+                    label: 'Videos',
+                  ),
+                ],
+              ),
             ),
-            NavigationDestination(
-              icon: Icon(Icons.video_collection_outlined),
-              selectedIcon: Icon(Icons.video_collection_rounded),
-              label: 'Videos',
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

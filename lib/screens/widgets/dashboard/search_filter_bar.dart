@@ -5,6 +5,7 @@ import '../../../core/constants/instruments.dart';
 import '../../../core/constants/services.dart';
 import '../../../core/security/input_sanitizer.dart'; // 🔒 FASE 3: Sanitización de entradas
 import '../../../core/theme/app_theme.dart';
+import '../status/city_picker_sheet.dart';
 
 /// Search field + genre/instrument/service pickers + "solo libres" and
 /// "solo mi ciudad" switches. Every change here triggers a fresh,
@@ -26,6 +27,8 @@ class SearchFilterBar extends StatelessWidget {
     required this.onOnlyFreeChanged,
     required this.searchNationwide,
     required this.onNationwideChanged,
+    required this.selectedCityFilter,
+    required this.onCityFilterSelected,
     this.homeCity,
   });
 
@@ -44,6 +47,15 @@ class SearchFilterBar extends StatelessWidget {
   /// musicians near [homeCity]; when `true` it lists the whole country.
   final bool searchNationwide;
   final ValueChanged<bool> onNationwideChanged;
+
+  /// Explicit "search this city" filter (e.g. "Valledupar"), independent of
+  /// [homeCity]/[searchNationwide] — set via [showCityPickerSheet]. When
+  /// non-null, [DashboardScreen] passes it as `fetchMusicians`'s `nearCity`
+  /// (with `searchNationwide: false`), so it gets the exact same
+  /// `CityZones` widening the "Cercanías" default already uses: a musician
+  /// based in a nearby commuter town still shows up, not just exact matches.
+  final String? selectedCityFilter;
+  final ValueChanged<String?> onCityFilterSelected;
 
   /// The logged-in musician's own base city, used purely to label the
   /// "Solo mi ciudad" switch and the caption below it — the actual
@@ -155,51 +167,79 @@ class SearchFilterBar extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _CategoryDropdownField(
-                  emoji: '🎵',
-                  label: 'Género',
-                  onTap: () => _openCategorySheet(
-                    context,
-                    title: 'Género',
-                    options: MusicGenres.all,
-                    selected: selectedGenre,
-                    onSelected: onGenreSelected,
+          // Horizontally scrollable instead of 4 `Expanded` columns — with
+          // Ciudad added, equal-width columns were squeezing every emoji +
+          // label into an unreadably narrow chip. A fixed width per chip
+          // plus a side-scroll keeps each one legible on any screen size.
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 140,
+                  child: _CategoryDropdownField(
+                    emoji: '🎵',
+                    label: 'Género',
+                    onTap: () => _openCategorySheet(
+                      context,
+                      title: 'Género',
+                      options: MusicGenres.all,
+                      selected: selectedGenre,
+                      onSelected: onGenreSelected,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: _CategoryDropdownField(
-                  emoji: '🎸',
-                  label: 'Instrumento',
-                  onTap: () => _openCategorySheet(
-                    context,
-                    title: 'Instrumento',
-                    options: VallenatoInstruments.all,
-                    selected: selectedInstrument,
-                    onSelected: onInstrumentSelected,
-                    includeAllOption: true,
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 140,
+                  child: _CategoryDropdownField(
+                    emoji: '🎸',
+                    label: 'Instrumento',
+                    onTap: () => _openCategorySheet(
+                      context,
+                      title: 'Instrumento',
+                      options: VallenatoInstruments.all,
+                      selected: selectedInstrument,
+                      onSelected: onInstrumentSelected,
+                      includeAllOption: true,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: _CategoryDropdownField(
-                  emoji: '💼',
-                  label: 'Servicios',
-                  onTap: () => _openCategorySheet(
-                    context,
-                    title: 'Servicios',
-                    options: MusicianServices.all,
-                    selected: selectedService,
-                    onSelected: onServiceSelected,
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 140,
+                  child: _CategoryDropdownField(
+                    emoji: '💼',
+                    label: 'Servicios',
+                    onTap: () => _openCategorySheet(
+                      context,
+                      title: 'Servicios',
+                      options: MusicianServices.all,
+                      selected: selectedService,
+                      onSelected: onServiceSelected,
+                    ),
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 140,
+                  child: _CategoryDropdownField(
+                    emoji: '📍',
+                    label: selectedCityFilter ?? 'Ciudad',
+                    onClear: selectedCityFilter != null
+                        ? () => onCityFilterSelected(null)
+                        : null,
+                    onTap: () async {
+                      final selected = await showCityPickerSheet(
+                        context,
+                        title: 'Buscar por ciudad',
+                      );
+                      if (selected != null) onCityFilterSelected(selected);
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
           IntrinsicHeight(
@@ -246,7 +286,19 @@ class SearchFilterBar extends StatelessWidget {
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: extension?.textSecondary,
                       ),
-                      children: searchNationwide
+                      children: selectedCityFilter != null
+                          ? [
+                              const TextSpan(text: 'Mostrando músicos en '),
+                              TextSpan(
+                                text: selectedCityFilter,
+                                style: const TextStyle(
+                                  color: AppColors.whatsAppIndigo,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const TextSpan(text: ' y alrededores.'),
+                            ]
+                          : searchNationwide
                           ? const [
                               TextSpan(text: 'Mostrando músicos de toda'),
                               TextSpan(
@@ -290,11 +342,17 @@ class _CategoryDropdownField extends StatelessWidget {
     required this.emoji,
     required this.label,
     required this.onTap,
+    this.onClear,
   });
 
   final String emoji;
   final String label;
   final VoidCallback onTap;
+
+  /// When non-null, an active selection is showing (e.g. a picked city) —
+  /// renders a small "×" instead of the chevron so it can be cleared
+  /// without reopening the picker just to pick nothing.
+  final VoidCallback? onClear;
 
   @override
   Widget build(BuildContext context) {
@@ -332,11 +390,22 @@ class _CategoryDropdownField extends StatelessWidget {
                 ),
               ),
             ),
-            Icon(
-              Icons.keyboard_arrow_down_rounded,
-              size: 16,
-              color: extension?.textSecondary,
-            ),
+            if (onClear != null)
+              InkWell(
+                borderRadius: BorderRadius.circular(999),
+                onTap: onClear,
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 16,
+                  color: extension?.textSecondary,
+                ),
+              )
+            else
+              Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 16,
+                color: extension?.textSecondary,
+              ),
           ],
         ),
       ),

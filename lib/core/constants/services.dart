@@ -20,6 +20,10 @@ abstract final class MusicianServices {
     'Catering',
     'Fotografia y video',
     'Estudios de grabación',
+    'Meseros y personal de apoyo',
+    'Fuegos artificiales',
+    'Decoración',
+    'Transporte',
   ];
 
   /// Every service other than [musician] is treated as a technical service

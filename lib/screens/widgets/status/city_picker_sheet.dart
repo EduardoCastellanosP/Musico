@@ -71,6 +71,13 @@ class _CityPickerSheetState extends State<_CityPickerSheet> {
     final query = _controller.text.trim();
     final showFreeTextOption = query.isNotEmpty && !_hasExactMatch(query);
 
+    // Bounded to the space actually left above the keyboard (rather than a
+    // fixed 340 list height) so opening the keyboard to type a search query
+    // shrinks the list instead of pushing the sheet's total height past the
+    // screen and overflowing.
+    final availableHeight =
+        MediaQuery.of(context).size.height - MediaQuery.of(context).viewInsets.bottom;
+
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.fromLTRB(
@@ -79,7 +86,9 @@ class _CityPickerSheetState extends State<_CityPickerSheet> {
           20,
           20 + MediaQuery.of(context).viewInsets.bottom,
         ),
-        child: Column(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: availableHeight * 0.85),
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -102,8 +111,7 @@ class _CityPickerSheetState extends State<_CityPickerSheet> {
               ),
             ),
             const SizedBox(height: 10),
-            SizedBox(
-              height: 340,
+            Flexible(
               child: ListView(
                 children: [
                   if (showFreeTextOption) ...[
@@ -153,6 +161,7 @@ class _CityPickerSheetState extends State<_CityPickerSheet> {
               ),
             ),
           ],
+          ),
         ),
       ),
     );

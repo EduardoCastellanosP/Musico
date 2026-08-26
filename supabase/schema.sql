@@ -154,6 +154,13 @@ alter table public.profiles
 alter table public.profiles
   add column if not exists last_media_at timestamptz;
 
+-- Public header/background photo behind the avatar on the profile detail
+-- screen — same `avatars` Storage bucket as `avatar_url`, just a different
+-- filename prefix (see `MusicianRepository.updateCover`). Null falls back
+-- to a themed gradient placeholder client-side.
+alter table public.profiles
+  add column if not exists cover_url text;
+
 alter table public.profiles drop constraint if exists profiles_photos_max_10;
 alter table public.profiles add constraint profiles_photos_max_10
   check (array_length(photos, 1) is null or array_length(photos, 1) <= 10);
