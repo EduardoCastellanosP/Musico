@@ -48,6 +48,13 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
   bool _reachedEnd = false;
   String? _error;
 
+  /// True only once [HomeShell] has actually switched to this tab (via
+  /// [resumeCurrent]) — `IndexedStack` mounts this screen immediately on app
+  /// start regardless of which tab is selected, so without this flag the
+  /// first video would start playing (with sound) the instant the app
+  /// opens, before the user ever visits "Videos".
+  bool _isTabActive = false;
+
   @override
   void initState() {
     super.initState();
@@ -67,12 +74,14 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
   /// when the user taps away from the "Videos" tab, so the audio doesn't
   /// keep playing under the "Directorio" tab.
   void pauseCurrent() {
+    _isTabActive = false;
     _controllers[_currentIndex]?.pause();
   }
 
   /// Resumes the current video — called by [HomeShell] when the user taps
   /// back into the "Videos" tab.
   void resumeCurrent() {
+    _isTabActive = true;
     final controller = _controllers[_currentIndex];
     if (controller != null && controller.value.isInitialized) {
       controller.play();
@@ -154,7 +163,7 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
         )..setLooping(true);
         controller.initialize().then((_) {
           if (!mounted || !_controllers.containsKey(i)) return;
-          if (i == _currentIndex) controller.play();
+          if (i == _currentIndex && _isTabActive) controller.play();
           setState(() {});
         });
         return controller;
@@ -163,7 +172,9 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
 
     for (final entry in _controllers.entries) {
       if (entry.key == index) {
-        if (entry.value.value.isInitialized) entry.value.play();
+        if (entry.value.value.isInitialized && _isTabActive) {
+          entry.value.play();
+        }
       } else {
         entry.value.pause();
       }
@@ -234,8 +245,12 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
   }
 
   /// Same optimistic-then-rollback shape as [_toggleLike], for "Seguir".
+  /// Guards against following yourself — see
+  /// [_MusicianDetailScreenState._toggleFollow] for why this can't just
+  /// rely on the repository's silent no-op.
   Future<void> _toggleFollow(VideoFeedItem item) async {
     final id = item.musicianId;
+    if (id == _repository.currentUserId) return;
     final wasFollowing = _followedMusicianIds.contains(id);
     setState(() {
       wasFollowing

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_notifier.dart';
 import '../../../models/musician_stats.dart';
+import '../../../repositories/musician_repository.dart';
+import '../profile/people_list_sheet.dart';
 import 'availability_switch.dart';
 
 const List<String> _weekdayNames = [
@@ -47,6 +49,7 @@ String _friendlyToday() {
 class DashboardHeader extends StatelessWidget {
   const DashboardHeader({
     super.key,
+    required this.musicianId,
     required this.greetingName,
     required this.stats,
     required this.onSettingsTap,
@@ -54,6 +57,11 @@ class DashboardHeader extends StatelessWidget {
     required this.onAvailabilityChanged,
   });
 
+  /// The logged-in musician's own id — null only for the brief window
+  /// before [DashboardScreen] finishes loading the profile. Used to fetch
+  /// the "seguidores"/"me gusta" lists when [_FollowersAndLikesRow] is
+  /// tapped.
+  final String? musicianId;
   final String? greetingName;
   final MusicianStats stats;
   final VoidCallback onSettingsTap;
@@ -99,6 +107,7 @@ class DashboardHeader extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
               child: _HeaderContent(
+                musicianId: musicianId,
                 greetingName: greetingName,
                 stats: stats,
                 onSettingsTap: onSettingsTap,
@@ -118,6 +127,7 @@ class DashboardHeader extends StatelessWidget {
 /// shell around it.
 class _HeaderContent extends StatelessWidget {
   const _HeaderContent({
+    required this.musicianId,
     required this.greetingName,
     required this.stats,
     required this.onSettingsTap,
@@ -125,6 +135,7 @@ class _HeaderContent extends StatelessWidget {
     required this.onAvailabilityChanged,
   });
 
+  final String? musicianId;
   final String? greetingName;
   final MusicianStats stats;
   final VoidCallback onSettingsTap;
@@ -182,7 +193,7 @@ class _HeaderContent extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 10),
-        _FollowersAndLikesRow(stats: stats),
+        _FollowersAndLikesRow(musicianId: musicianId, stats: stats),
         const SizedBox(height: 20),
         AvailabilitySwitch(isFree: isFree, onChanged: onAvailabilityChanged),
       ],
@@ -217,10 +228,12 @@ class _CircleIconButton extends StatelessWidget {
 
 /// "N seguidores · N me gusta", sourced from the same `musician_follows`/
 /// `video_likes` counts [MusicianRepository.fetchContactStats] returns —
-/// sits between the greeting name and the Libre/Ocupado switch.
+/// sits between the greeting name and the Libre/Ocupado switch. Each half
+/// is tappable and opens the matching list via [showPeopleListSheet].
 class _FollowersAndLikesRow extends StatelessWidget {
-  const _FollowersAndLikesRow({required this.stats});
+  const _FollowersAndLikesRow({required this.musicianId, required this.stats});
 
+  final String? musicianId;
   final MusicianStats stats;
 
   @override
@@ -230,16 +243,56 @@ class _FollowersAndLikesRow extends StatelessWidget {
       fontWeight: FontWeight.w600,
       fontSize: 13,
     );
+    final repository = MusicianRepository();
+    final id = musicianId;
 
     return Row(
       children: [
-        const Icon(Icons.people_alt_rounded, size: 15, color: Colors.white70),
-        const SizedBox(width: 4),
-        Text('${stats.followersCount} seguidores', style: textStyle),
+        InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: id == null
+              ? null
+              : () => showPeopleListSheet(
+                    context,
+                    title: 'Seguidores',
+                    fetchPeople: () => repository.fetchFollowers(id),
+                  ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.people_alt_rounded,
+                size: 15,
+                color: Colors.white70,
+              ),
+              const SizedBox(width: 4),
+              Text('${stats.followersCount} seguidores', style: textStyle),
+            ],
+          ),
+        ),
         const SizedBox(width: 14),
-        const Icon(Icons.favorite_rounded, size: 15, color: Colors.white70),
-        const SizedBox(width: 4),
-        Text('${stats.totalVideoLikes} me gusta', style: textStyle),
+        InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: id == null
+              ? null
+              : () => showPeopleListSheet(
+                    context,
+                    title: 'Me gusta',
+                    fetchPeople: () => repository.fetchVideoLikers(id),
+                  ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.favorite_rounded,
+                size: 15,
+                color: Colors.white70,
+              ),
+              const SizedBox(width: 4),
+              Text('${stats.totalVideoLikes} me gusta', style: textStyle),
+            ],
+          ),
+        ),
       ],
     );
   }

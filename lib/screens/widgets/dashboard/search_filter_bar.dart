@@ -74,8 +74,13 @@ class SearchFilterBar extends StatelessWidget {
     final theme = Theme.of(context);
     final extension = theme.extension<AppThemeExtension>();
 
+    // Sorted alphabetically so long lists (e.g. instruments) read in a
+    // predictable order instead of whatever order they were declared in.
+    final sortedOptions = [...options]..sort();
+
     showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: extension?.cardColor ?? theme.cardColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -86,44 +91,61 @@ class SearchFilterBar extends StatelessWidget {
           builder: (sheetContext, setModalState) {
             final sheetTheme = Theme.of(sheetContext);
 
+            // Toggle: tapping the already-selected chip clears the filter
+            // instead of re-selecting it — `option` here is a fixed chip
+            // value, never null, so only the "already selected" case needs
+            // to fall back to null.
             void select(String? option) {
-              onSelected(option); // lógica existente — callback global intacto
-              setModalState(() => localSelection = option);
+              final next = localSelection == option ? null : option;
+              onSelected(next); // lógica existente — callback global intacto
+              setModalState(() => localSelection = next);
             }
 
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: sheetTheme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+            // `DraggableScrollableSheet` (same pattern as the legal-terms
+            // sheet in LoginScreen) instead of a plain fixed-height Column —
+            // with enough options the chips no longer overflow past the
+            // screen edge with no way to reach them.
+            return DraggableScrollableSheet(
+              initialChildSize: 0.5,
+              minChildSize: 0.3,
+              maxChildSize: 0.9,
+              expand: false,
+              builder: (context, scrollController) => SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+                  child: SingleChildScrollView(
+                    controller: scrollController,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (includeAllOption)
-                          _FilterChip(
-                            label: 'Todos',
-                            selected: localSelection == null,
-                            onTap: () => select(null),
+                        Text(
+                          title,
+                          style: sheetTheme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
                           ),
-                        for (final option in options)
-                          _FilterChip(
-                            label: option,
-                            selected: localSelection == option,
-                            onTap: () => select(option),
-                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            if (includeAllOption)
+                              _FilterChip(
+                                label: 'Todos',
+                                selected: localSelection == null,
+                                onTap: () => select(null),
+                              ),
+                            for (final option in sortedOptions)
+                              _FilterChip(
+                                label: option,
+                                selected: localSelection == option,
+                                onTap: () => select(option),
+                              ),
+                          ],
+                        ),
                       ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             );

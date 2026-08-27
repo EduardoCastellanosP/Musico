@@ -280,6 +280,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             slivers: [
               SliverToBoxAdapter(
                 child: DashboardHeader(
+                  musicianId: _currentProfile?.id,
                   greetingName: _currentProfile?.fullName,
                   stats: _stats,
                   onSettingsTap: _openStatusScreen,

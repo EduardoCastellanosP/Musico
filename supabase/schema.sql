@@ -799,12 +799,16 @@ create table if not exists public.musician_follows (
 
 alter table public.musician_follows enable row level security;
 
+-- Allows a user to read both "who I follow" (follower_id = me) and
+-- "who follows me" (musician_id = me) — without the second half, a
+-- musician's own followers_count query can never see rows where someone
+-- else follows them, so it always reads back as 0.
 drop policy if exists "musician_follows_select_own" on public.musician_follows;
 create policy "musician_follows_select_own"
   on public.musician_follows
   for select
   to authenticated
-  using (auth.uid() = follower_id);
+  using (auth.uid() = follower_id or auth.uid() = musician_id);
 
 drop policy if exists "musician_follows_insert_own" on public.musician_follows;
 create policy "musician_follows_insert_own"
@@ -819,3 +823,47 @@ create policy "musician_follows_delete_own"
   for delete
   to authenticated
   using (auth.uid() = follower_id);
+
+-- =========================================================
+-- 12. Listados públicos de seguidores / likes
+-- La app es un directorio público: cualquier usuario autenticado puede
+-- abrir la lista de seguidores o de "me gusta" de CUALQUIER músico (no solo
+-- la propia), a diferencia de las políticas RLS de arriba (que solo dejan
+-- ver tus propias filas). `security definer` es lo que permite a estas
+-- funciones saltarse esa restricción de forma controlada: solo exponen las
+-- columnas de perfil (id, nombre, avatar) que ya son públicas en el
+-- directorio, nunca las tablas base completas.
+-- =========================================================
+create or replace function public.get_musician_followers(target_musician_id uuid)
+returns table (id uuid, full_name text, avatar_url text, followed_at timestamptz)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.id, p.full_name, p.avatar_url, mf.created_at as followed_at
+  from public.musician_follows mf
+  join public.profiles p on p.id = mf.follower_id
+  where mf.musician_id = target_musician_id
+  order by mf.created_at desc;
+$$;
+
+grant execute on function public.get_musician_followers(uuid) to authenticated;
+
+create or replace function public.get_video_likers(target_musician_id uuid)
+returns table (id uuid, full_name text, avatar_url text, liked_at timestamptz)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.id, p.full_name, p.avatar_url, max(vl.created_at) as liked_at
+  from public.video_likes vl
+  join public.musician_videos mv on mv.id = vl.video_id
+  join public.profiles p on p.id = vl.user_id
+  where mv.musician_id = target_musician_id
+  group by p.id, p.full_name, p.avatar_url
+  order by liked_at desc;
+$$;
+
+grant execute on function public.get_video_likers(uuid) to authenticated;

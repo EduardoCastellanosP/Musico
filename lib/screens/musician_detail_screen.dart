@@ -12,6 +12,7 @@ import '../repositories/musician_repository.dart';
 import 'in_app_video_player_screen.dart';
 import 'photo_viewer_screen.dart';
 import 'widgets/profile/media_grid.dart';
+import 'widgets/profile/people_list_sheet.dart';
 import 'widgets/profile/profile_header.dart';
 
 /// Full-screen profile a contratante sees after tapping a [MusicianCard]:
@@ -37,6 +38,7 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
   late List<MusicianVideo> _videos;
 
   bool _isFollowing = false;
+  ({int followers, int likes}) _followStats = (followers: 0, likes: 0);
 
   @override
   void initState() {
@@ -46,16 +48,27 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
   }
 
   Future<void> _loadFollowState() async {
-    final followed = await _repository.fetchFollowedMusicianIds([
-      widget.musician.id,
-    ]);
+    final musicianId = widget.musician.id;
+    final followedFuture = _repository.fetchFollowedMusicianIds([musicianId]);
+    final statsFuture = _repository.fetchPublicFollowStats(musicianId);
+    final followed = await followedFuture;
+    final stats = await statsFuture;
     if (!mounted) return;
-    setState(() => _isFollowing = followed.contains(widget.musician.id));
+    setState(() {
+      _isFollowing = followed.contains(musicianId);
+      _followStats = stats;
+    });
   }
 
   /// Optimistic toggle — same shape as [VideoFeedScreenState._toggleFollow]:
   /// flip the button immediately, roll back only if the write fails.
+  ///
+  /// Guards against following yourself: [MusicianRepository.followMusician]
+  /// already no-ops server-side for this case, but without this check the
+  /// button would still optimistically (and incorrectly) flip to
+  /// "Siguiendo" since that no-op doesn't throw.
   Future<void> _toggleFollow() async {
+    if (widget.musician.id == _repository.currentUserId) return;
     final wasFollowing = _isFollowing;
     setState(() => _isFollowing = !wasFollowing);
     try {
@@ -144,8 +157,10 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
               SliverToBoxAdapter(
                 child: ProfileHeader(
                   musician: musician,
-                  backgroundImageUrl:
-                      musician.photos.isNotEmpty ? musician.photos.first : null,
+                  backgroundImageUrl: musician.coverUrl ??
+                      (musician.photos.isNotEmpty
+                          ? musician.photos.first
+                          : null),
                 ),
               ),
               SliverPadding(
@@ -219,7 +234,13 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
                           ? () => _contact(isWhatsApp: false)
                           : null,
                     ),
-                    const SizedBox(height: 28),
+                    const SizedBox(height: 16),
+                    _FollowStatsRow(
+                      musicianId: musician.id,
+                      repository: _repository,
+                      stats: _followStats,
+                    ),
+                    const SizedBox(height: 12),
                     Text(
                       'Multimedia',
                       style: theme.textTheme.titleMedium?.copyWith(
@@ -275,6 +296,63 @@ class _BackButton extends StatelessWidget {
           child: Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
         ),
       ),
+    );
+  }
+}
+
+/// "N seguidores · N me gusta" for the musician being viewed — same shape
+/// and tap behavior as [DashboardHeader]'s own-profile row, just fed by
+/// [MusicianRepository.fetchPublicFollowStats] for a third-party profile
+/// instead of [MusicianRepository.fetchContactStats] for the logged-in one.
+class _FollowStatsRow extends StatelessWidget {
+  const _FollowStatsRow({
+    required this.musicianId,
+    required this.repository,
+    required this.stats,
+  });
+
+  final String musicianId;
+  final MusicianRepository repository;
+  final ({int followers, int likes}) stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final extension = theme.extension<AppThemeExtension>();
+    final textStyle = theme.textTheme.bodyMedium?.copyWith(
+      color: extension?.textSecondary,
+      fontWeight: FontWeight.w600,
+    );
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => showPeopleListSheet(
+            context,
+            title: 'Seguidores',
+            fetchPeople: () => repository.fetchFollowers(musicianId),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Text('${stats.followers} seguidores', style: textStyle),
+          ),
+        ),
+        const SizedBox(width: 8),
+        InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => showPeopleListSheet(
+            context,
+            title: 'Me gusta',
+            fetchPeople: () => repository.fetchVideoLikers(musicianId),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Text('${stats.likes} me gusta', style: textStyle),
+          ),
+        ),
+      ],
     );
   }
 }

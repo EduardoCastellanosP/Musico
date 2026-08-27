@@ -6,6 +6,7 @@ import '../core/constants/city_zones.dart';
 import '../models/musician.dart';
 import '../models/musician_stats.dart';
 import '../models/musician_video.dart';
+import '../models/profile_summary.dart';
 import '../models/video_feed_item.dart';
 
 const String _photosBucket = 'musician-photos';
@@ -32,6 +33,10 @@ class MusicianRepository {
     : _client = client ?? Supabase.instance.client;
 
   final SupabaseClient _client;
+
+  /// The logged-in user's id, or `null` when signed out — used by screens to
+  /// hide/guard actions (like "Seguir") against a user's own profile.
+  String? get currentUserId => _client.auth.currentUser?.id;
 
   /// Directory query with dynamic filters, applied server-side so the
   /// result set (and the "N músicos" count derived from it) always reflects
@@ -616,6 +621,52 @@ class MusicianRepository {
         .delete()
         .eq('musician_id', musicianId)
         .eq('follower_id', uid);
+  }
+
+  /// Everyone following [musicianId], newest first — feeds the tappable
+  /// "N seguidores" list on both "Mi Estado" and [MusicianDetailScreen].
+  ///
+  /// Goes through the `get_musician_followers` RPC (a `security definer`
+  /// SQL function joining `musician_follows` to `profiles`) rather than a
+  /// plain `.select()`, because the `musician_follows` RLS policy only lets
+  /// a row be read by its follower or its musician — it can't be opened for
+  /// an arbitrary third viewer the way this public-directory list needs.
+  Future<List<ProfileSummary>> fetchFollowers(String musicianId) async {
+    final rows = await _client.rpc(
+      'get_musician_followers',
+      params: {'target_musician_id': musicianId},
+    );
+    return (rows as List)
+        .map((row) => ProfileSummary.fromJson(row as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Everyone who has liked any of [musicianId]'s videos, newest like
+  /// first, deduplicated per user — same `security definer` RPC pattern as
+  /// [fetchFollowers], for the same reason (`video_likes` RLS is
+  /// liker-only).
+  Future<List<ProfileSummary>> fetchVideoLikers(String musicianId) async {
+    final rows = await _client.rpc(
+      'get_video_likers',
+      params: {'target_musician_id': musicianId},
+    );
+    return (rows as List)
+        .map((row) => ProfileSummary.fromJson(row as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Counts backing [MusicianDetailScreen]'s tappable followers/likes row —
+  /// reuses [fetchFollowers]/[fetchVideoLikers] rather than a separate
+  /// count-only query, so the displayed number can never drift from what
+  /// actually opens in the list sheet.
+  Future<({int followers, int likes})> fetchPublicFollowStats(
+    String musicianId,
+  ) async {
+    final followersFuture = fetchFollowers(musicianId);
+    final likersFuture = fetchVideoLikers(musicianId);
+    final followers = await followersFuture;
+    final likers = await likersFuture;
+    return (followers: followers.length, likes: likers.length);
   }
 
   String _requireUserId() {
