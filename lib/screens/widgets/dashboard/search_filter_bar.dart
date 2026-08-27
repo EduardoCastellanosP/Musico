@@ -131,7 +131,7 @@ class SearchFilterBar extends StatelessWidget {
                           children: [
                             if (includeAllOption)
                               _FilterChip(
-                                label: 'Todos',
+                                label: 'Ninguno',
                                 selected: localSelection == null,
                                 onTap: () => select(null),
                               ),

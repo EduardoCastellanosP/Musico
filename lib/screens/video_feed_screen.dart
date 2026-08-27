@@ -15,14 +15,17 @@ import 'musician_detail_screen.dart';
 /// (current ± 1, to make the next swipe instant) and disposes the rest, so
 /// scrolling through a long feed never accumulates decoders/memory.
 ///
-/// The `State` is public ([VideoFeedScreenState], not the usual
-/// underscore-prefixed convention) so [HomeShell] can hold a `GlobalKey`
-/// to it and call [pauseCurrent] the moment the bottom nav switches away
-/// from this tab — `IndexedStack` keeps this screen mounted (so playback
-/// position/feed scroll survive tab switches) but does nothing on its own
-/// to stop an off-screen video's audio.
+/// [isActive] is [HomeShell]'s current tab selection, threaded down as a
+/// plain prop — `IndexedStack` mounts this screen immediately regardless of
+/// which tab is selected (so playback position/feed scroll survive tab
+/// switches) but has no notion of "visible on screen", so without this flag
+/// a freshly-initialized controller would start playing (with sound) the
+/// instant the app opens, before the user ever visits "Videos".
 class VideoFeedScreen extends StatefulWidget {
-  const VideoFeedScreen({super.key, required this.onBack});
+  const VideoFeedScreen({super.key, required this.isActive, required this.onBack});
+
+  /// Whether the "Videos" tab is the one currently selected in [HomeShell].
+  final bool isActive;
 
   /// Called when the user taps the back arrow overlay — [HomeShell] wires
   /// this to switch back to the Directorio tab (and bring its bottom nav
@@ -48,17 +51,17 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
   bool _reachedEnd = false;
   String? _error;
 
-  /// True only once [HomeShell] has actually switched to this tab (via
-  /// [resumeCurrent]) — `IndexedStack` mounts this screen immediately on app
-  /// start regardless of which tab is selected, so without this flag the
-  /// first video would start playing (with sound) the instant the app
-  /// opens, before the user ever visits "Videos".
-  bool _isTabActive = false;
-
   @override
   void initState() {
     super.initState();
     _loadInitial();
+  }
+
+  @override
+  void didUpdateWidget(VideoFeedScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive == oldWidget.isActive) return;
+    widget.isActive ? _playCurrent() : _pauseCurrent();
   }
 
   @override
@@ -70,18 +73,19 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
     super.dispose();
   }
 
-  /// Pauses whichever video is currently playing — called by [HomeShell]
-  /// when the user taps away from the "Videos" tab, so the audio doesn't
-  /// keep playing under the "Directorio" tab.
-  void pauseCurrent() {
-    _isTabActive = false;
+  /// Pauses whichever video is on screen — used both when [HomeShell]
+  /// switches away from the "Videos" tab (via [didUpdateWidget]) and when
+  /// this screen itself pushes a route on top (see [_openProfile]), so the
+  /// audio doesn't keep playing under a screen the user can't see.
+  void _pauseCurrent() {
     _controllers[_currentIndex]?.pause();
   }
 
-  /// Resumes the current video — called by [HomeShell] when the user taps
-  /// back into the "Videos" tab.
-  void resumeCurrent() {
-    _isTabActive = true;
+  /// Plays the current video, but only if it's actually initialized and
+  /// this tab is the one currently visible — guards against a controller
+  /// that finishes initializing while [widget.isActive] is still false.
+  void _playCurrent() {
+    if (!widget.isActive) return;
     final controller = _controllers[_currentIndex];
     if (controller != null && controller.value.isInitialized) {
       controller.play();
@@ -163,7 +167,7 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
         )..setLooping(true);
         controller.initialize().then((_) {
           if (!mounted || !_controllers.containsKey(i)) return;
-          if (i == _currentIndex && _isTabActive) controller.play();
+          if (i == _currentIndex) _playCurrent();
           setState(() {});
         });
         return controller;
@@ -172,9 +176,7 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
 
     for (final entry in _controllers.entries) {
       if (entry.key == index) {
-        if (entry.value.value.isInitialized && _isTabActive) {
-          entry.value.play();
-        }
+        _playCurrent();
       } else {
         entry.value.pause();
       }
@@ -194,16 +196,16 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
 
   /// Opens the full public profile for [item]'s musician — pauses the
   /// video first and resumes it on return, the same "don't leave audio
-  /// playing under a screen the user can't see" concern [pauseCurrent]/
-  /// [resumeCurrent] already handle for tab switches.
+  /// playing under a screen the user can't see" concern [didUpdateWidget]
+  /// already handles for tab switches.
   Future<void> _openProfile(VideoFeedItem item) async {
     final musician = await _repository.fetchMusicianById(item.musicianId);
     if (!mounted || musician == null) return;
-    pauseCurrent();
+    _pauseCurrent();
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => MusicianDetailScreen(musician: musician)),
     );
-    if (mounted) resumeCurrent();
+    if (mounted) _playCurrent();
   }
 
   Future<void> _contactWhatsApp(VideoFeedItem item) async {
@@ -530,9 +532,9 @@ class _VideoFeedOverlay extends StatelessWidget {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  icon: const Icon(Icons.chat_bubble_rounded, size: 16),
+                  // icon: const Icon(Icons.chat_bubble_rounded, size: 16),
                   label: const Text(
-                    'Contactar',
+                    'WhatsApp',
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                   ),
                 ),

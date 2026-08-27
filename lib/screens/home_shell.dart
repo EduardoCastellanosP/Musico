@@ -21,25 +21,7 @@ class _HomeShellState extends State<HomeShell> {
 
   int _index = 0;
 
-  // `IndexedStack` only hides the inactive tab visually — it has no notion
-  // of "this screen is no longer visible", so a playing video keeps its
-  // audio running underneath the Directorio tab unless something outside
-  // VideoFeedScreen tells it to pause. This key is that "something": it
-  // reaches into VideoFeedScreenState directly the moment the destination
-  // changes, instead of threading a `visible` flag through props.
-  final _videoFeedKey = GlobalKey<VideoFeedScreenState>();
-
-  void _onDestinationSelected(int index) => _goToTab(index);
-
-  void _goToTab(int index) {
-    if (index == _index) return;
-    if (_index == _videosTabIndex) {
-      _videoFeedKey.currentState?.pauseCurrent();
-    } else if (index == _videosTabIndex) {
-      _videoFeedKey.currentState?.resumeCurrent();
-    }
-    setState(() => _index = index);
-  }
+  void _goToTab(int index) => setState(() => _index = index);
 
   @override
   Widget build(BuildContext context) {
@@ -51,7 +33,7 @@ class _HomeShellState extends State<HomeShell> {
         children: [
           const DashboardScreen(),
           VideoFeedScreen(
-            key: _videoFeedKey,
+            isActive: onVideosTab,
             onBack: () => _goToTab(0),
           ),
         ],
@@ -85,7 +67,7 @@ class _HomeShellState extends State<HomeShell> {
               ),
               child: NavigationBar(
                 selectedIndex: _index,
-                onDestinationSelected: _onDestinationSelected,
+                onDestinationSelected: _goToTab,
                 destinations: const [
                   NavigationDestination(
                     icon: Icon(Icons.people_alt_outlined),
