@@ -20,7 +20,6 @@ ios-workflow:
       - name: Forzar nuevo Bundle ID en todo iOS
         script: |
           cd ios
-          # Reemplaza todas las variantes del identificador antiguo en los archivos de Xcode
           grep -rl "vallenatoconnect.vallenatoConnect" . | xargs sed -i 's/vallenatoconnect.vallenatoConnect/mussy.mussyconnect/g'
           grep -rl "com.vallenatoconnect.vallenatoConnect" . | xargs sed -i 's/com.vallenatoconnect.vallenatoConnect/com.mussy.mussyconnect/g'
           cd ..
@@ -31,6 +30,6 @@ ios-workflow:
           
       - name: Compilar iOS (Release)
         script: |
-          flutter build ios --release --no-codesign --bundle-id=com.mussy.mussyconnect
+          flutter build ios --release
     artifacts:
       - build/ios/iphoneos/*.app
