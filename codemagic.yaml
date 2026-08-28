@@ -4,7 +4,7 @@ workflows:
     max_build_duration: 60
     environment:
       groups:
-        - my_credentials # Nombre del grupo donde guardaste ENV_FILE_BASE64 en Codemagic
+        - my_credentials
       flutter: stable
       xcode: latest
       cocoapods: default
@@ -23,3 +23,32 @@ workflows:
           flutter build appbundle --release
     artifacts:
       - build/app/outputs/bundle/release/*.aab
+
+  ios-workflow:
+    name: iOS Workflow
+    max_build_duration: 60
+    environment:
+      groups:
+        - my_credentials
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Decodificar y crear archivo .env
+        script: |
+          echo "Creando archivo .env desde la variable de entorno..."
+          echo $ENV_FILE_BASE64 | base64 --decode > .env
+          
+      - name: Instalar dependencias de Flutter
+        script: |
+          flutter packages pub get
+          
+      - name: Configurar Pods e instalar
+        script: |
+          find . -name "Podfile" -execdir pod install \;
+          
+      - name: Compilar iOS (Release)
+        script: |
+          flutter build ios --release --no-codesign
+    artifacts:
+      - build/ios/iphoneos/*.app
