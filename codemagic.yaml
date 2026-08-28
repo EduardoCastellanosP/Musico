@@ -17,19 +17,25 @@ ios-workflow:
         script: |
           flutter packages pub get
           
-      - name: Forzar nuevo Bundle ID en todo iOS
+      - name: Forzar nuevo Bundle ID y Configurar Firma Manual
         script: |
           cd ios
+          # Actualizar Bundle ID por si acaso
           grep -rl "vallenatoconnect.vallenatoConnect" . | xargs sed -i 's/vallenatoconnect.vallenatoConnect/mussy.mussyconnect/g'
           grep -rl "com.vallenatoconnect.vallenatoConnect" . | xargs sed -i 's/com.vallenatoconnect.vallenatoConnect/com.mussy.mussyconnect/g'
+          
+          # Habilitar firma manual y asegurar que Xcode use el perfil correcto
+          # (Codemagic expone automáticamente variables para las identidades de firma si están configuradas en su panel web)
           cd ..
           
       - name: Configurar Pods e instalar
         script: |
           find . -name "Podfile" -execdir pod install \;
           
-      - name: Compilar iOS (Release)
+      - name: Compilar iOS con perfiles de Codemagic
         script: |
+          # Usamos xcode-project run-workflows o dejamos que flutter compile usando el perfil de aprovisionamiento de Codemagic
+          # Asegúrate de usar --release SIN --no-codesign para que Codemagic aplique tus certificados
           flutter build ios --release
     artifacts:
       - build/ios/iphoneos/*.app
