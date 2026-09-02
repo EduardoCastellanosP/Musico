@@ -11,7 +11,7 @@ workflows:
         - my_credentials
       
       ios_signing:
-        distribution_type: app_store
+        distribution_type: app_store # Configurado para producción y TestFlight
         bundle_identifier: com.mussy.mussyconnect
 
       flutter: stable
@@ -19,31 +19,17 @@ workflows:
       cocoapods: default
 
     scripts:
-      - name: Crear archivo .env directamente
+      - name: Crear archivo .env de forma segura
         script: |
           echo "Creando archivo .env en la raíz del proyecto..."
-          
-          cat << 'EOF' > /Users/builder/clone/.env
-          SUPABASE_URL=https://kqvnnmswfiitusmvqhpy.supabase.co
-          SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtxdm5ubXN3ZmlpdHVzbXZxaHB5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY3NDgzNzgsImV4cCI6MjEwMjMyNDM3OH0.VBJdV9vsy0lj7XM1E8FCCKXwiJEBN2kap_ENxL75qOk
+          cat << EOF > /Users/builder/clone/.env
+          SUPABASE_URL=$SUPABASE_URL
+          SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
           EOF
-
-          echo "¡Verificando archivo .env creado!"
-          ls -la /Users/builder/clone/.env
-          cat /Users/builder/clone/.env
 
       - name: Obtener dependencias Flutter
         script: |
           flutter pub get
-
-      - name: Verificar Bundle ID
-        script: |
-          echo "======================================"
-          echo "BUNDLE ID CONFIGURADO:"
-          echo "com.mussy.mussyconnect"
-          echo "======================================"
-
-          grep -R "PRODUCT_BUNDLE_IDENTIFIER" ios/Runner.xcodeproj/project.pbxproj || true
 
       - name: Instalar CocoaPods
         script: |
@@ -53,7 +39,7 @@ workflows:
 
       - name: Configurar firma de iOS
         script: |
-          echo "Configurando certificados y provisioning profiles..."
+          echo "Configurando certificados y provisioning profiles para App Store..."
           xcode-project use-profiles
 
       - name: Compilar IPA
