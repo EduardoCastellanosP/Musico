@@ -23,10 +23,11 @@
         android:label="MUSSY"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        
-        android:allowBackup="false"        
-        android:usesCleartextTraffic="false" 
-        android:networkSecurityConfig="@xml/network_security_config" >
+
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:enableOnBackInvokedCallback="true" >
         
         <activity
             android:name=".MainActivity"

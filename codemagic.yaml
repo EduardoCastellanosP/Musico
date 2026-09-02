@@ -1,41 +1,59 @@
-ios-workflow:
+workflows:
+  ios-workflow:
     name: iOS Workflow
     max_build_duration: 60
+
+    integrations:
+      app_store_connect: codemagic
+
     environment:
       groups:
         - my_credentials
+
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.mussy.mussyconnect
+
       flutter: stable
       xcode: latest
       cocoapods: default
+
     scripts:
-      - name: Decodificar y crear archivo .env
+
+      - name: Crear archivo .env
         script: |
-          echo "Creando archivo .env desde la variable de entorno..."
-          echo $ENV_FILE_BASE64 | base64 --decode > .env
-          
-      - name: Instalar dependencias de Flutter
+          echo "Creando archivo .env..."
+          echo "$ENV_FILE_BASE64" | base64 --decode > .env
+          echo ".env creado correctamente"
+
+      - name: Obtener dependencias Flutter
         script: |
-          flutter packages pub get
-          
-      - name: Forzar nuevo Bundle ID y Configurar Firma Manual
+          flutter pub get
+
+      - name: Verificar Bundle ID
+        script: |
+          echo "======================================"
+          echo "BUNDLE ID CONFIGURADO:"
+          echo "com.mussy.mussyconnect"
+          echo "======================================"
+
+          grep -R "PRODUCT_BUNDLE_IDENTIFIER" ios/Runner.xcodeproj/project.pbxproj || true
+
+      - name: Instalar CocoaPods
         script: |
           cd ios
-          # Actualizar Bundle ID por si acaso
-          grep -rl "vallenatoconnect.vallenatoConnect" . | xargs sed -i 's/vallenatoconnect.vallenatoConnect/mussy.mussyconnect/g'
-          grep -rl "com.vallenatoconnect.vallenatoConnect" . | xargs sed -i 's/com.vallenatoconnect.vallenatoConnect/com.mussy.mussyconnect/g'
-          
-          # Habilitar firma manual y asegurar que Xcode use el perfil correcto
-          # (Codemagic expone automáticamente variables para las identidades de firma si están configuradas en su panel web)
+          pod install
           cd ..
-          
-      - name: Configurar Pods e instalar
+
+      - name: Configurar firma de iOS
         script: |
-          find . -name "Podfile" -execdir pod install \;
-          
-      - name: Compilar iOS con perfiles de Codemagic
+          echo "Configurando certificados y provisioning profiles..."
+          xcode-project use-profiles
+
+      - name: Compilar IPA
         script: |
-          # Usamos xcode-project run-workflows o dejamos que flutter compile usando el perfil de aprovisionamiento de Codemagic
-          # Asegúrate de usar --release SIN --no-codesign para que Codemagic aplique tus certificados
-          flutter build ios --release
+          flutter build ipa --release
+
     artifacts:
-      - build/ios/iphoneos/*.app
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
