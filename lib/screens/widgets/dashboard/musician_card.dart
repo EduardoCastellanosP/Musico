@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import '../../../core/constants/whatsapp.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/musician.dart';
 
@@ -24,37 +23,39 @@ class MusicianCard extends StatelessWidget {
     final extension = theme.extension<AppThemeExtension>();
     final isDark = theme.brightness == Brightness.dark;
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-      decoration: BoxDecoration(
-        color: isDark
-            ? const Color(0xFF1A1F36)
-            : (extension?.cardColor ?? theme.cardColor),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: isDark ? null : AppColors.lightCardShadow,
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  flex: 38,
-                  child: _MusicianImageFrame(musician: musician),
-                ),
-                Expanded(
-                  flex: 62,
-                  child: _MusicianCardContent(
-                    musician: musician,
-                    onWhatsAppTap: onWhatsAppTap,
-                    onCallTap: onCallTap,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark
+              ? const Color(0xFF1A1F36)
+              : (extension?.cardColor ?? theme.cardColor),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: isDark ? null : AppColors.lightCardShadow,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    flex: 32,
+                    child: _MusicianImageFrame(musician: musician),
                   ),
-                ),
-              ],
+                  Expanded(
+                    flex: 68,
+                    child: _MusicianCardContent(
+                      musician: musician,
+                      onWhatsAppTap: onWhatsAppTap,
+                      onCallTap: onCallTap,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -77,7 +78,7 @@ class _MusicianImageFrame extends StatelessWidget {
 
   final Musician musician;
 
-  static const double _maxIntrinsicHeight = 200;
+  static const double _maxIntrinsicHeight = 118;
 
   @override
   Widget build(BuildContext context) {
@@ -173,26 +174,24 @@ class _MusicianCardContent extends StatelessWidget {
     final extension = theme.extension<AppThemeExtension>();
     final isDark = theme.brightness == Brightness.dark;
 
-    final chipBackground = isDark
-        ? AppColors.infoChipBackgroundDark
-        : AppColors.infoChipBackgroundLight;
-    final chipForeground = isDark
-        ? AppColors.infoChipForegroundDark
-        : AppColors.infoChipForegroundLight;
-
     // Category emoji so the card reads at a glance whether this is a
     // performer (instruments) or a technical provider (sound gear, venues).
     final categoryEmoji = musician.offersMusicianService
-        ? '🎸 '
+        ? ' '
         : musician.offersTechnicalService
-        ? '🔧 '
+        ? ' '
         : '';
-    final subtitle = musician.instruments.isNotEmpty
+    final serviceLine = musician.instruments.isNotEmpty
         ? '$categoryEmoji${musician.instrumentsSummary}'
         : '$categoryEmoji${musician.services.join(' · ')}';
 
+    final subtitleStyle = theme.textTheme.bodySmall?.copyWith(
+      color: extension?.textSecondary,
+      fontSize: 11.5,
+    );
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -204,96 +203,48 @@ class _MusicianCardContent extends StatelessWidget {
                   musician.fullName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
+                  style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 20,
-                color: extension?.textSecondary,
-              ),
+              const SizedBox(width: 8),
+              _StatusDot(isFree: musician.isFree),
             ],
           ),
-          if (subtitle.isNotEmpty) ...[
-            const SizedBox(height: 2),
-            Text(
-              subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: extension?.textSecondary,
-              ),
-            ),
-          ],
-          if (musician.genres.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final genre in musician.genres)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: chipBackground,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      genre,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: chipForeground,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ],
-          if (musician.city.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(Icons.location_on_rounded, size: 13, color: extension?.textSecondary),
-                const SizedBox(width: 4),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              _RatingStars(rating: musician.rating),
+              if (musician.city.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Text('•', style: subtitleStyle),
+                const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     musician.city,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(color: extension?.textSecondary),
+                    style: subtitleStyle,
                   ),
                 ),
               ],
-            ),
-          ],
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: musician.isFree ? Colors.green : Colors.red,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  musician.availabilityLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: musician.isFree ? Colors.green.shade700 : Colors.red.shade700,
-                  ),
-                ),
-              ),
             ],
           ),
-          const SizedBox(height: 12),
+          if (musician.genres.isNotEmpty) ...[
+            const SizedBox(height: 3),
+            Text(
+              musician.genres.join('   —   '),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: subtitleStyle,
+            ),
+          ],
+          if (serviceLine.trim().isNotEmpty) ...[
+            const SizedBox(height: 6),
+            _ServiceChip(label: serviceLine, isDark: isDark),
+          ],
+          const SizedBox(height: 8),
           Row(
             children: [
               Expanded(
@@ -302,7 +253,6 @@ class _MusicianCardContent extends StatelessWidget {
                     'assets/images/logowpp.svg',
                     width: 20,
                     height: 20,
-                    // colorFilter: const ColorFilter.mode(Colors.white, BlendMode.srcIn),
                   ),
                   label: 'Wpp',
                   backgroundColor: const Color(0xFF25D366),
@@ -324,6 +274,127 @@ class _MusicianCardContent extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Houses the instrument/service line as the card's visual core — a
+/// rounded, accent-tinted chip instead of plain text, so what the musician
+/// actually offers is what draws the eye.
+class _ServiceChip extends StatelessWidget {
+  const _ServiceChip({required this.label, required this.isDark});
+
+  final String label;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColors.accent.withValues(alpha: isDark ? 0.16 : 0.10),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.accent.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: AppColors.accent,
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+}
+
+/// Small pulsing dot standing in for the old "Disponible ahora"/"Ocupado"
+/// text — emerald while free, crimson while busy, no label needed.
+///
+/// The [AnimationController] only drives this widget's own `builder`
+/// closure, and [RepaintBoundary] scopes the resulting per-frame repaint to
+/// just this dot, so a list full of these pulsing independently doesn't
+/// cost scroll FPS.
+class _StatusDot extends StatefulWidget {
+  const _StatusDot({required this.isFree});
+
+  final bool isFree;
+
+  @override
+  State<_StatusDot> createState() => _StatusDotState();
+}
+
+class _StatusDotState extends State<_StatusDot>
+    with SingleTickerProviderStateMixin {
+  static const _free = Color(0xFF10B981); // verde
+  static const _busy = Color(0xFFDC2626); // rojo
+
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.isFree ? _free : _busy;
+
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final glow = 0.4 + _controller.value * 0.5;
+          return Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color,
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: glow),
+                  blurRadius: 5 + _controller.value * 3,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Compact fixed 5-star rating, gold fill proportional to
+/// [Musician.rating] — half-star granularity.
+class _RatingStars extends StatelessWidget {
+  const _RatingStars({required this.rating});
+
+  final double rating;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(5, (index) {
+        final threshold = index + 1;
+        final IconData icon;
+        if (rating >= threshold) {
+          icon = Icons.star_rounded;
+        } else if (rating >= threshold - 0.5) {
+          icon = Icons.star_half_rounded;
+        } else {
+          icon = Icons.star_border_rounded;
+        }
+        return Icon(icon, size: 13, color: Colors.amber);
+      }),
     );
   }
 }
