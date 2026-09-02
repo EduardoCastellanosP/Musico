@@ -23,16 +23,24 @@ workflows:
         script: |
           echo "Directorio actual:"
           pwd
-          echo "Creando archivo .env desde variable base64..."
           
-          # Forzamos la ubicación exacta en la raíz del proyecto clonado
-          echo "$ENV_FILE_BASE64" | base64 -d > /Users/builder/clone/.env
+          if [ -z "$ENV_FILE_BASE64" ]; then
+            echo "¡ERROR CRÍTICO! La variable ENV_FILE_BASE64 no está configurada."
+            exit 1
+          fi
+
+          echo "Creando archivo .env desde variable base64 (limpiando saltos de línea)..."
+          
+          # Limpiamos espacios y saltos de línea del base64 antes de decodificar
+          echo "$ENV_FILE_BASE64" | tr -d '\n' | tr -d '\r' | base64 --decode > /Users/builder/clone/.env
           
           if [ -f "/Users/builder/clone/.env" ]; then
             echo "¡Éxito! El archivo .env existe en la ruta absoluta."
             ls -la /Users/builder/clone/.env
+            echo "Contenido generado con éxito:"
+            cat /Users/builder/clone/.env
           else
-            echo "¡ALERTA! El archivo .env no existe."
+            echo "¡ALERTA! El archivo .env no se pudo crear."
             exit 1
           fi
 
