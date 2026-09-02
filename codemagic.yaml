@@ -11,7 +11,7 @@ workflows:
         - my_credentials
       
       ios_signing:
-        distribution_type: app_store # Configurado para producción y TestFlight
+        distribution_type: app_store
         bundle_identifier: com.mussy.mussyconnect
 
       flutter: stable
@@ -37,12 +37,12 @@ workflows:
           pod install
           cd ..
 
-      - name: Configurar firma de iOS
+      - name: Configurar firma para TestFlight
         script: |
-          echo "Configurando certificados y provisioning profiles para App Store..."
+          echo "Configurando perfiles de distribución..."
           xcode-project use-profiles
 
-      - name: Compilar IPA
+      - name: Compilar IPA para App Store / TestFlight
         script: |
           flutter build ipa --release
 
