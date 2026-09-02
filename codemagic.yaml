@@ -26,7 +26,7 @@ workflows:
           echo "Creando archivo .env desde variable base64..."
           
           # Forzamos la ubicación exacta en la raíz del proyecto clonado
-          echo "$ENV_FILE_BASE64" | base64 -D > /Users/builder/clone/.env
+          echo "$ENV_FILE_BASE64" | base64 -d > /Users/builder/clone/.env
           
           if [ -f "/Users/builder/clone/.env" ]; then
             echo "¡Éxito! El archivo .env existe en la ruta absoluta."
