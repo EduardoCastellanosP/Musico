@@ -1,51 +1,33 @@
 workflows:
-  ios-workflow:
-    name: iOS Workflow
+  android-workflow:
+    name: Android Workflow
     max_build_duration: 60
-
-    integrations:
-      app_store_connect: codemagic
 
     environment:
       groups:
-        - my_credentials
-      
-      ios_signing:
-        distribution_type: app_store # Forzar tipo App Store / TestFlight para evitar requisitos de UDID
-        bundle_identifier: com.mussy.mussyconnect
+        - my_credentials # Grupo donde tienes guardadas tus variables SUPABASE_URL y SUPABASE_ANON_KEY
 
       flutter: stable
       xcode: latest
-      cocoapods: default
 
     scripts:
-      - name: Crear archivo .env de forma segura
+      - name: Crear archivo .env
         script: |
-          echo "Creando archivo .env en la raíz del proyecto..."
-          cat << EOF > /Users/builder/clone/.env
+          echo "Creando el archivo .env en la raíz del proyecto..."
+          pwd
+          cat << EOF > .env
           SUPABASE_URL=$SUPABASE_URL
           SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
           EOF
+          ls -la # Verifica que el archivo .env se haya creado correctamente
 
-      - name: Obtener dependencias Flutter
+      - name: Obtener dependencias de Flutter
         script: |
           flutter pub get
 
-      - name: Instalar CocoaPods
+      - name: Compilar APK / App Bundle de Android
         script: |
-          cd ios
-          pod install
-          cd ..
-
-      - name: Configurar firma para TestFlight
-        script: |
-          echo "Configurando perfiles de distribución..."
-          xcode-project use-profiles
-
-      - name: Compilar IPA
-        script: |
-          flutter build ipa --release
+          flutter build appbundle --release
 
     artifacts:
-      - build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_logs/*.log
+      - build/app/outputs/bundle/release/*.aab
