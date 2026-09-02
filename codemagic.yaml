@@ -11,7 +11,7 @@ workflows:
         - my_credentials
       
       ios_signing:
-        distribution_type: app_store
+        distribution_type: app_store # Forzar tipo App Store / TestFlight para evitar requisitos de UDID
         bundle_identifier: com.mussy.mussyconnect
 
       flutter: stable
@@ -42,7 +42,7 @@ workflows:
           echo "Configurando perfiles de distribución..."
           xcode-project use-profiles
 
-      - name: Compilar IPA para App Store / TestFlight
+      - name: Compilar IPA
         script: |
           flutter build ipa --release
 
