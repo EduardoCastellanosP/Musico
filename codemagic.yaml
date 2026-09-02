@@ -7,9 +7,11 @@ workflows:
       app_store_connect: codemagic
 
     environment:
+      vars:
+        ENV_FILE_BASE64: "$ENV_FILE_BASE64"
       groups:
         - my_credentials
-
+      
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.mussy.mussyconnect
@@ -20,11 +22,16 @@ workflows:
 
     scripts:
 
-      - name: Crear archivo .env
+     - name: Crear archivo .env
         script: |
-          echo "Creando archivo .env..."
-          echo "$ENV_FILE_BASE64" | base64 --decode > .env
-          echo ".env creado correctamente"
+          echo "Creando archivo .env en la raíz..."
+          echo "$ENV_FILE_BASE64" | base64 -D > .env
+          if [ -f .env ]; then
+            echo "¡El archivo .env se creó exitosamente!"
+          else
+            echo "Error: El archivo .env no se pudo crear."
+            exit 1
+          fi
 
       - name: Obtener dependencias Flutter
         script: |
