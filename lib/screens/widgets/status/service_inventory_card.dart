@@ -2,14 +2,24 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
 
-/// Free-text "Inventario / Descripción del Servicio" field, shown whenever
-/// the musician offers a technical service (sound, rehearsal space, etc.).
-/// Kept separate from [MusicianSkillsCard] since a profile can offer a
-/// technical service with or without also being a "Músico".
+/// Free-text description field, shown for every role but with a title/hint
+/// tailored to it — years of experience and bands played for a "Músico",
+/// sound/lighting inventory for a technical service, amenities for a
+/// rehearsal space or stage rental, or both at once when a profile offers
+/// more than one. [title] mirrors [Musician.descriptionSectionTitle] so
+/// this card and [MusicianDetailScreen]'s read-only view always agree on
+/// what to call the field for a given role mix.
 class ServiceInventoryCard extends StatelessWidget {
-  const ServiceInventoryCard({super.key, required this.controller});
+  const ServiceInventoryCard({
+    super.key,
+    required this.controller,
+    required this.title,
+    required this.hint,
+  });
 
   final TextEditingController controller;
+  final String title;
+  final String hint;
 
   @override
   Widget build(BuildContext context) {
@@ -28,14 +38,14 @@ class ServiceInventoryCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Inventario / Descripción del servicio',
+            title,
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w700,
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            'Cuéntale a los contratantes qué equipo o espacio ofreces.',
+            'Esto es lo primero que leen los contratantes en tu perfil público.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: extension?.textSecondary,
             ),
@@ -43,14 +53,11 @@ class ServiceInventoryCard extends StatelessWidget {
           const SizedBox(height: 14),
           TextField(
             controller: controller,
-            maxLines: 5,
+            maxLines: 6,
             minLines: 3,
             style: theme.textTheme.bodyLarge,
-            decoration: const InputDecoration(
-              hintText:
-                  'Ej: 2 cabinas activas de 15", consola de 12 canales, '
-                  'micrófonos inalámbricos. Sala insonorizada con batería, '
-                  'bajo y teclado incluidos.',
+            decoration: InputDecoration(
+              hintText: hint,
               alignLabelWithHint: true,
             ),
           ),

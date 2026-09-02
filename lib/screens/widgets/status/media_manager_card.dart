@@ -90,7 +90,7 @@ class MediaManagerCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Muestra fotos y videos de tu trabajo a los organizadores.',
+            'Sube al menos 1 foto y 1 video para poder publicar tu perfil.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: extension?.textSecondary,
             ),

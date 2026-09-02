@@ -867,3 +867,86 @@ as $$
 $$;
 
 grant execute on function public.get_video_likers(uuid) to authenticated;
+
+-- =========================================================
+-- 13. Completitud de perfil: solo perfiles completos son públicos
+-- Requisitos obligatorios antes de que un perfil aparezca en el directorio
+-- (`fetchMusicians`) o en el feed de videos: ciudad, teléfono, al menos un
+-- instrumento o servicio, al menos 1 foto y al menos 1 video. Esto se
+-- decide en el servidor (no solo en el formulario de Flutter) porque
+-- `handle_new_user` (sección 5) ya inserta una fila de `profiles` vacía en
+-- cuanto alguien se registra — sin este filtro, esa fila incompleta sería
+-- pública desde el minuto uno.
+--
+-- `is_complete` es una columna denormalizada (no una `generated column`,
+-- porque el requisito de video vive en la tabla relacional
+-- `musician_videos`, no en `profiles`) recalculada por trigger cada vez que
+-- cambia algo relevante: mismo patrón que `last_media_at`/
+-- `bump_last_media_at` (sección 11).
+-- =========================================================
+alter table public.profiles
+  add column if not exists is_complete boolean not null default false;
+
+create or replace function public.recompute_profile_complete(target_id uuid)
+returns void
+language plpgsql
+as $$
+begin
+  update public.profiles p
+  set is_complete = (
+    btrim(p.city) <> ''
+    and btrim(p.phone) <> ''
+    and (
+      coalesce(array_length(p.instruments, 1), 0) > 0
+      or coalesce(array_length(p.services, 1), 0) > 0
+    )
+    and coalesce(array_length(p.photos, 1), 0) > 0
+    and exists (
+      select 1 from public.musician_videos mv where mv.musician_id = p.id
+    )
+  )
+  where p.id = target_id;
+end;
+$$;
+
+create or replace function public.profiles_recompute_complete()
+returns trigger
+language plpgsql
+as $$
+begin
+  perform public.recompute_profile_complete(new.id);
+  return new;
+end;
+$$;
+
+-- `update of (...)` scopes this to the columns completeness actually
+-- depends on — the nested `update` inside `recompute_profile_complete`
+-- only touches `is_complete`, which isn't in this list, so it can't
+-- recursively re-fire itself.
+drop trigger if exists profiles_recompute_complete on public.profiles;
+create trigger profiles_recompute_complete
+  after insert or update of city, phone, instruments, services, photos
+  on public.profiles
+  for each row
+  execute function public.profiles_recompute_complete();
+
+create or replace function public.musician_videos_recompute_owner_complete()
+returns trigger
+language plpgsql
+as $$
+begin
+  perform public.recompute_profile_complete(coalesce(new.musician_id, old.musician_id));
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists musician_videos_recompute_complete on public.musician_videos;
+create trigger musician_videos_recompute_complete
+  after insert or delete on public.musician_videos
+  for each row
+  execute function public.musician_videos_recompute_owner_complete();
+
+comment on column public.profiles.is_complete is 'Recalculada por trigger: true cuando el perfil tiene ciudad, teléfono, al menos un instrumento/servicio, al menos 1 foto y al menos 1 video. Solo los perfiles completos aparecen en el directorio público.';
+
+-- Backfill único: aplica la regla a cada perfil ya existente.
+select public.recompute_profile_complete(id) from public.profiles;

@@ -193,10 +193,16 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
                     ],
                     if (musician.serviceDescription.isNotEmpty) ...[
                       Text(
-                        musician.serviceDescription,
-                        style: theme.textTheme.bodyMedium?.copyWith(
+                        musician.descriptionSectionTitle,
+                        style: theme.textTheme.labelLarge?.copyWith(
                           color: extension?.textSecondary,
+                          fontWeight: FontWeight.w600,
                         ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        musician.serviceDescription,
+                        style: theme.textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 16),
                     ],

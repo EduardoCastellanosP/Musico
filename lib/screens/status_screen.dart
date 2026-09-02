@@ -80,6 +80,34 @@ class _StatusScreenState extends State<StatusScreen>
   bool get _hasTechnicalService =>
       _selectedServices.any(MusicianServices.technical.contains);
 
+  /// Same branching [Musician.descriptionSectionTitle] uses, computed from
+  /// the form's *unsaved* selection instead of the last-saved [_profile] —
+  /// keeps the title in sync as the user checks/unchecks services, before
+  /// they've hit "Guardar cambios".
+  String get _descriptionTitle {
+    if (_isMusician && _hasTechnicalService) return 'Experiencia y equipo que ofrece';
+    if (_isMusician) return 'Experiencia';
+    if (_hasTechnicalService) return 'Inventario y equipo';
+    return 'Descripción';
+  }
+
+  String get _descriptionHint {
+    if (_isMusician && _hasTechnicalService) {
+      return 'Ej: 8 años tocando acordeón en bandas vallenatas, más consola '
+          'de 12 canales y cabinas propias para eventos pequeños.';
+    }
+    if (_isMusician) {
+      return 'Ej: 8 años de experiencia, bandas con las que has tocado, '
+          'festivales o eventos destacados.';
+    }
+    if (_hasTechnicalService) {
+      return 'Ej: 2 cabinas activas de 15", consola de 12 canales, '
+          'micrófonos inalámbricos. Sala insonorizada con batería, '
+          'bajo y teclado incluidos.';
+    }
+    return 'Cuéntale a los contratantes qué ofreces.';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -558,20 +586,37 @@ class _StatusScreenState extends State<StatusScreen>
   // ponytail: selector de franja horaria oculto para v1 → _computeBusyUntil,
   // eliminado por no tener llamadores; restaurar junto con AvailabilityTimeCard.
 
+  /// Blocks "Guardar cambios" — and therefore the public card, since a
+  /// profile only becomes visible in the directory once it's actually
+  /// saved with these fields (see `schema.sql` section 13, `is_complete`)
+  /// — until every mandatory field is filled in. Each check returns a
+  /// single, specific message naming exactly what's missing.
   String? _validate() {
     if (_fullNameController.text.trim().isEmpty) {
       return 'El nombre completo no puede estar vacío.';
+    }
+    if (_cityController.text.trim().isEmpty) {
+      return 'Ingresa tu ciudad para poder publicar tu perfil.';
     }
     final phoneDigits = _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
     if (phoneDigits.length != 10) {
       return 'Ingresa un número de WhatsApp válido de 10 dígitos.';
     }
     if (_selectedServices.isEmpty) {
-      return 'Selecciona al menos un servicio que ofreces.';
+      return 'Selecciona al menos un instrumento o servicio que ofreces.';
+    }
+    if (_isMusician && _selectedInstruments.isEmpty) {
+      return 'Selecciona al menos un instrumento que toques.';
     }
     final experienceYears = int.tryParse(_experienceYearsController.text.trim());
     if (experienceYears == null || experienceYears < 0) {
       return 'Ingresa un número válido de años de experiencia.';
+    }
+    if (_photos.isEmpty) {
+      return 'Sube al menos 1 foto para poder publicar tu perfil.';
+    }
+    if (_videos.isEmpty) {
+      return 'Sube al menos 1 video para poder publicar tu perfil.';
     }
     return null;
   }
@@ -633,7 +678,7 @@ class _StatusScreenState extends State<StatusScreen>
           phone: phone,
           genres: genres,
           services: _selectedServices,
-          serviceDescription: _hasTechnicalService ? serviceDescription : '',
+          serviceDescription: serviceDescription,
           coverageCities: _coverageCities,
         ),
       ]);
@@ -659,7 +704,7 @@ class _StatusScreenState extends State<StatusScreen>
           phone: phone,
           genres: genres,
           services: _selectedServices,
-          serviceDescription: _hasTechnicalService ? serviceDescription : '',
+          serviceDescription: serviceDescription,
           coverageCities: _coverageCities,
           isFree: _isFree,
           statusMessage: statusMessage,
@@ -788,12 +833,12 @@ class _StatusScreenState extends State<StatusScreen>
                     onChanged: (value) =>
                         setState(() => _selectedServices = value),
                   ),
-                  if (_hasTechnicalService) ...[
-                    const SizedBox(height: 16),
-                    ServiceInventoryCard(
-                      controller: _serviceDescriptionController,
-                    ),
-                  ],
+                  const SizedBox(height: 16),
+                  ServiceInventoryCard(
+                    controller: _serviceDescriptionController,
+                    title: _descriptionTitle,
+                    hint: _descriptionHint,
+                  ),
                   const SizedBox(height: 16),
                   CoverageCitiesCard(
                     cities: _coverageCities,
