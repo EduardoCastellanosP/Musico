@@ -8,7 +8,7 @@ workflows:
 
     environment:
       groups:
-        - my_credentials
+        - my_credentials # Reemplaza por el nombre exacto de tu grupo de secretos en Codemagic
       
       ios_signing:
         distribution_type: app_store
@@ -19,32 +19,22 @@ workflows:
       cocoapods: default
 
     scripts:
-      - name: Asegurar creación de .env en la raíz
-        script: |
-          echo "Creando el archivo .env de forma explícita..."
-          cd /Users/builder/clone
-          echo "SUPABASE_URL=$SUPABASE_URL" > .env
-          echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> .env
-          echo "Contenido actual del directorio:"
-          ls -la
-          echo "Verificando contenido del archivo .env:"
-          cat .env
-
       - name: Obtener dependencias de Flutter
         script: |
-          cd /Users/builder/clone
+          cd $FCI_BUILD_DIR
           flutter pub get
 
       - name: Instalar CocoaPods
         script: |
-          cd /Users/builder/clone/ios
+          cd $FCI_BUILD_DIR/ios
           pod install
-          cd ..
 
-      - name: Compilar IPA para TestFlight
+      - name: Compilar IPA para TestFlight con Dart Defines
         script: |
-          cd /Users/builder/clone
-          flutter build ipa --release
+          cd $FCI_BUILD_DIR
+          flutter build ipa --release \
+            --dart-define=SUPABASE_URL=$SUPABASE_URL \
+            --dart-define=SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
 
     artifacts:
       - build/ios/ipa/*.ipa
