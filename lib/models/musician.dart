@@ -33,7 +33,6 @@ class Musician {
     required this.photos,
     required this.videos,
     required this.lastMediaAt,
-    required this.isComplete,
   });
 
   factory Musician.fromJson(Map<String, dynamic> json) {
@@ -67,7 +66,6 @@ class Musician {
       lastMediaAt: json['last_media_at'] != null
           ? DateTime.tryParse(json['last_media_at'] as String)
           : null,
-      isComplete: json['is_complete'] as bool? ?? false,
     );
   }
 
@@ -158,12 +156,6 @@ class Musician {
   /// they've never uploaded anything.
   final DateTime? lastMediaAt;
 
-  /// Recalculated server-side (see `schema.sql` section 13): true once this
-  /// profile has a city, phone, at least one instrument/service, at least
-  /// 1 photo and at least 1 video. Read-only — [copyWith] never lets the
-  /// app set it directly, since only the server can know it's current.
-  final bool isComplete;
-
   bool get canAddMorePhotos => photos.length < MediaLimits.maxPhotos;
 
   /// True within 48h of the musician's last portfolio upload — the window
@@ -194,6 +186,21 @@ class Musician {
     if (offersTechnicalService) return 'Inventario y equipo';
     return 'Descripción';
   }
+
+  /// The 5 fields "Mi Estado" requires before "Guardar cambios" succeeds —
+  /// city, phone, at least one instrument/service, at least 1 photo and at
+  /// least 1 video. Purely a write-time gate (enforced client-side in
+  /// `StatusScreen._validate`): an incomplete profile is never rejected by
+  /// a `SELECT`, so anyone can still browse the directory regardless of
+  /// their own profile's state here. This getter's other use is gating
+  /// *contacting* someone else — see `showCompleteProfilePrompt` — from
+  /// the viewer's own profile, not from the card being viewed.
+  bool get hasCompleteProfile =>
+      city.trim().isNotEmpty &&
+      hasPhone &&
+      (instruments.isNotEmpty || services.isNotEmpty) &&
+      photos.isNotEmpty &&
+      videos.isNotEmpty;
 
   Musician copyWith({
     String? fullName,
@@ -242,7 +249,6 @@ class Musician {
       photos: photos ?? this.photos,
       videos: videos ?? this.videos,
       lastMediaAt: lastMediaAt ?? this.lastMediaAt,
-      isComplete: isComplete,
     );
   }
 

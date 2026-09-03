@@ -9,6 +9,7 @@ import '../models/musician_stats.dart';
 import '../repositories/musician_repository.dart';
 import 'musician_detail_screen.dart';
 import 'status_screen.dart';
+import 'widgets/complete_profile_prompt.dart';
 import 'widgets/dashboard/auto_checkout_dialog.dart';
 import 'widgets/dashboard/dashboard_header.dart';
 import 'widgets/dashboard/musician_card.dart';
@@ -240,8 +241,15 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   Future<void> _contact(Musician musician, {required bool isWhatsApp}) async {
+  // Browsing the directory never requires a finished profile — only
+  // reaching out to someone does. See [Musician.hasCompleteProfile].
+  if (!(_currentProfile?.hasCompleteProfile ?? false)) {
+    await showCompleteProfilePrompt(context);
+    return;
+  }
+
   final Uri uri;
-  
+
   if (isWhatsApp) {
     // 1. Limpiamos el número para asegurar que solo queden dígitos
     final cleanPhone = musician.phone.replaceAll(RegExp(r'\D'), '');

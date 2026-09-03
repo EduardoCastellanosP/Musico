@@ -215,7 +215,7 @@ class SearchFilterBar extends StatelessWidget {
                 SizedBox(
                   width: 140,
                   child: _CategoryDropdownField(
-                    emoji: '',
+                    emoji: '🎹 ',
                     label: 'Instrumento',
                     onTap: () => _openCategorySheet(
                       context,
@@ -231,7 +231,7 @@ class SearchFilterBar extends StatelessWidget {
                 SizedBox(
                   width: 140,
                   child: _CategoryDropdownField(
-                    emoji: '',
+                    emoji: '💼',
                     label: 'Servicios',
                     onTap: () => _openCategorySheet(
                       context,
@@ -246,7 +246,7 @@ class SearchFilterBar extends StatelessWidget {
                 SizedBox(
                   width: 140,
                   child: _CategoryDropdownField(
-                    emoji: '',
+                    emoji: '📍 ',
                     label: selectedCityFilter ?? 'Ciudad',
                     onClear: selectedCityFilter != null
                         ? () => onCityFilterSelected(null)

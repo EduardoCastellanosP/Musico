@@ -586,11 +586,13 @@ class _StatusScreenState extends State<StatusScreen>
   // ponytail: selector de franja horaria oculto para v1 → _computeBusyUntil,
   // eliminado por no tener llamadores; restaurar junto con AvailabilityTimeCard.
 
-  /// Blocks "Guardar cambios" — and therefore the public card, since a
-  /// profile only becomes visible in the directory once it's actually
-  /// saved with these fields (see `schema.sql` section 13, `is_complete`)
-  /// — until every mandatory field is filled in. Each check returns a
-  /// single, specific message naming exactly what's missing.
+  /// Blocks "Guardar cambios" until every mandatory field is filled in —
+  /// this is the only place completeness is enforced (write-time, purely
+  /// client-side); the directory's `SELECT` stays open to every profile
+  /// regardless of this, see `schema.sql` section 13. Each check returns a
+  /// single, specific message naming exactly what's missing. The same 5
+  /// fields back [Musician.hasCompleteProfile], used separately to gate
+  /// *contacting* someone else.
   String? _validate() {
     if (_fullNameController.text.trim().isEmpty) {
       return 'El nombre completo no puede estar vacío.';
@@ -714,14 +716,43 @@ class _StatusScreenState extends State<StatusScreen>
           busyUntil: busyUntil,
           clearBusyUntil: busyUntil == null,
         );
+        _saving = false;
       });
-      _showMessage('Perfil actualizado correctamente');
+      await _showSavedDialogThenGoHome();
     } catch (_) {
       if (!mounted) return;
       _showMessage('No pudimos guardar los cambios. Intenta de nuevo.');
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  /// Success modal for a save — SweetAlert-style: rounded, centered, a soft
+  /// scale-in, no dismiss but the "Continuar" button. Once the user taps
+  /// it, [Navigator.popUntil] with `isFirst` drops every route pushed on
+  /// top of the app's root screen (this form included), the unnamed
+  /// equivalent of `pushNamedAndRemoveUntil` — this app never registered
+  /// named routes (see `MyApp.home` in `main.dart`), and matches the same
+  /// "can't come back to a stale screen" pattern [_confirmSignOut] already
+  /// uses via `pushAndRemoveUntil`.
+  Future<void> _showSavedDialogThenGoHome() async {
+    await showGeneralDialog<void>(
+      context: context,
+      barrierLabel: 'Perfil guardado',
+      barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      transitionDuration: const Duration(milliseconds: 260),
+      pageBuilder: (context, _, _) => const _SavedSuccessDialog(),
+      transitionBuilder: (context, animation, _, child) {
+        final curve = CurvedAnimation(parent: animation, curve: Curves.easeOutBack);
+        return Opacity(
+          opacity: animation.value.clamp(0, 1),
+          child: Transform.scale(scale: 0.85 + 0.15 * curve.value, child: child),
+        );
+      },
+    );
+    if (!mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   @override
@@ -995,6 +1026,91 @@ class _SaveBar extends StatelessWidget {
                     ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// SweetAlert-style success modal shown after a profile save — rounded
+/// card, a glowing checkmark, and a single "Continuar" action. Purely
+/// presentational: [StatusScreen._showSavedDialogThenGoHome] owns the
+/// entrance animation and what happens once this pops itself.
+class _SavedSuccessDialog extends StatelessWidget {
+  const _SavedSuccessDialog();
+
+  static const _success = Color(0xFF10B981);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final extension = theme.extension<AppThemeExtension>();
+
+    return Dialog(
+      backgroundColor: extension?.cardColor ?? theme.cardColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(28, 32, 28, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _success.withValues(alpha: 0.12),
+                boxShadow: [
+                  BoxShadow(
+                    color: _success.withValues(alpha: 0.25),
+                    blurRadius: 24,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.check_rounded,
+                color: _success,
+                size: 44,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              '¡Datos guardados con éxito!',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Tu perfil está listo para que los organizadores te encuentren.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: extension?.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _success,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                child: const Text(
+                  'Continuar',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

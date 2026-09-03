@@ -91,14 +91,6 @@ class MusicianRepository {
       query = query.eq('is_free', true);
     }
 
-    // Server-side gate (see schema.sql section 13, `is_complete`): a
-    // profile only shows up in the public directory once it has a city,
-    // phone, at least one instrument/service, at least 1 photo and at
-    // least 1 video. Without this, `handle_new_user`'s bare row would be
-    // public the instant someone signs up, before they ever touch "Mi
-    // Estado".
-    query = query.eq('is_complete', true);
-
     final currentUserId = _client.auth.currentUser?.id;
     if (currentUserId != null) {
       // Excludes the logged-in musician from their own directory feed —
@@ -149,6 +141,16 @@ class MusicianRepository {
     return Musician.fromJson(row);
   }
 
+  /// Whether the logged-in user's own profile is complete enough
+  /// ([Musician.hasCompleteProfile]) to contact someone else. Browsing the
+  /// directory never requires this — only [DashboardScreen], [MusicianDetailScreen]
+  /// and [VideoFeedScreen] call it, right before acting on a WhatsApp/Llamar
+  /// tap, to decide whether to show [showCompleteProfilePrompt] instead.
+  Future<bool> currentProfileCanContact() async {
+    final profile = await fetchCurrentProfile();
+    return profile?.hasCompleteProfile ?? false;
+  }
+
   /// Any musician's full profile by id — used by [VideoFeedScreen] to open
   /// [MusicianDetailScreen] when the viewer taps a video's profile row
   /// (that screen needs the full [Musician], not [VideoFeedItem]'s smaller
@@ -173,23 +175,16 @@ class MusicianRepository {
     int limit = 8,
     DateTime? before,
   }) async {
-    // `!inner` makes the embedded `profiles` row filterable — the
-    // `.eq('profiles.is_complete', ...)` below is the same gate as
-    // [fetchMusicians], so a video never surfaces in the public feed for a
-    // profile still missing a required field. Declaring the embed in this
-    // first `.select()` (rather than a second one added later) is what
-    // keeps the return type a `PostgrestFilterBuilder` here, so `.lt()`/
-    // `.eq()` can still chain on it below.
     PostgrestFilterBuilder<PostgrestList> query = _client
         .from('musician_videos')
-        .select('$_videoColumns, profiles!inner($_feedProfileColumns)')
-        .eq('profiles.is_complete', true);
+        .select();
 
     if (before != null) {
       query = query.lt('created_at', before.toIso8601String());
     }
 
     final rows = await query
+        .select('$_videoColumns, profiles($_feedProfileColumns)')
         .order('created_at', ascending: false)
         .limit(limit);
 

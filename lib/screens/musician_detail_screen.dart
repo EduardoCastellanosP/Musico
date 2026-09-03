@@ -11,6 +11,7 @@ import '../models/musician_video.dart';
 import '../repositories/musician_repository.dart';
 import 'in_app_video_player_screen.dart';
 import 'photo_viewer_screen.dart';
+import 'widgets/complete_profile_prompt.dart';
 import 'widgets/profile/media_grid.dart';
 import 'widgets/profile/people_list_sheet.dart';
 import 'widgets/profile/profile_header.dart';
@@ -84,6 +85,14 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
   }
 
   Future<void> _contact({required bool isWhatsApp}) async {
+    // Same gate as [DashboardScreen._contact]: viewing this profile never
+    // required the viewer's own to be complete, only contacting does.
+    if (!await _repository.currentProfileCanContact()) {
+      if (!mounted) return;
+      await showCompleteProfilePrompt(context);
+      return;
+    }
+
     final musician = widget.musician;
     final uri = isWhatsApp ? musician.whatsappUri : musician.callUri;
 

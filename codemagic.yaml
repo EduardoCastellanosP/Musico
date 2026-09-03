@@ -1,33 +1,51 @@
 workflows:
-  android-workflow:
-    name: Android Workflow
+  ios-workflow:
+    name: iOS Workflow
     max_build_duration: 60
+
+    integrations:
+      app_store_connect: codemagic
 
     environment:
       groups:
-        - my_credentials # Grupo donde tienes guardadas tus variables SUPABASE_URL y SUPABASE_ANON_KEY
+        - my_credentials
+      
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.mussy.mussyconnect
 
       flutter: stable
       xcode: latest
+      cocoapods: default
 
     scripts:
-      - name: Crear archivo .env
+      - name: Asegurar creación de .env en la raíz
         script: |
-          echo "Creando el archivo .env en la raíz del proyecto..."
-          pwd
-          cat << EOF > .env
-          SUPABASE_URL=$SUPABASE_URL
-          SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY
-          EOF
-          ls -la # Verifica que el archivo .env se haya creado correctamente
+          echo "Creando el archivo .env de forma explícita..."
+          cd /Users/builder/clone
+          echo "SUPABASE_URL=$SUPABASE_URL" > .env
+          echo "SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY" >> .env
+          echo "Contenido actual del directorio:"
+          ls -la
+          echo "Verificando contenido del archivo .env:"
+          cat .env
 
       - name: Obtener dependencias de Flutter
         script: |
+          cd /Users/builder/clone
           flutter pub get
 
-      - name: Compilar APK / App Bundle de Android
+      - name: Instalar CocoaPods
         script: |
-          flutter build appbundle --release
+          cd /Users/builder/clone/ios
+          pod install
+          cd ..
+
+      - name: Compilar IPA para TestFlight
+        script: |
+          cd /Users/builder/clone
+          flutter build ipa --release
 
     artifacts:
-      - build/app/outputs/bundle/release/*.aab
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log

@@ -8,6 +8,7 @@ import '../core/theme/app_theme.dart';
 import '../models/video_feed_item.dart';
 import '../repositories/musician_repository.dart';
 import 'musician_detail_screen.dart';
+import 'widgets/complete_profile_prompt.dart';
 
 /// Reels/TikTok-style vertical feed of every musician's uploaded videos,
 /// newest first. Only the on-screen page's [VideoPlayerController] is ever
@@ -51,6 +52,17 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
   bool _reachedEnd = false;
   String? _error;
 
+  /// Pagination cursor for [_loadMore]'s `before` — tracked separately
+  /// from `_items` because [_shuffled] reorders the on-screen list, so
+  /// `_items.last` is no longer necessarily the oldest video actually
+  /// fetched. Always the min `created_at` seen across every batch so far.
+  DateTime? _oldestLoadedAt;
+
+  /// Guards [didUpdateWidget]'s auto-refresh so it doesn't immediately
+  /// re-fetch the instant the user first swipes to this tab — [initState]
+  /// already loaded it moments earlier, regardless of [widget.isActive].
+  bool _hasBeenActive = false;
+
   @override
   void initState() {
     super.initState();
@@ -61,7 +73,17 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
   void didUpdateWidget(VideoFeedScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.isActive == oldWidget.isActive) return;
-    widget.isActive ? _playCurrent() : _pauseCurrent();
+    if (widget.isActive) {
+      _playCurrent();
+      // Every time the user comes back to this tab (not the first time),
+      // silently pull whatever's new — this screen otherwise never
+      // refreshes on its own since `HomeShell` keeps it permanently
+      // mounted via `IndexedStack`.
+      if (_hasBeenActive) _refresh();
+      _hasBeenActive = true;
+    } else {
+      _pauseCurrent();
+    }
   }
 
   @override
@@ -94,7 +116,7 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
 
   Future<void> _loadInitial() async {
     try {
-      final items = await _repository.fetchVideoFeed();
+      final items = _shuffled(await _repository.fetchVideoFeed());
       final liked = await _repository.fetchLikedVideoIds(
         items.map((item) => item.video.id).toList(),
       );
@@ -109,6 +131,7 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
         _loading = false;
         _reachedEnd = items.isEmpty;
       });
+      _trackOldest(items);
       _ensureControllersAround(0);
       if (items.isNotEmpty) _countView(0);
     } catch (_) {
@@ -124,8 +147,8 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
     if (_loadingMore || _reachedEnd || _items.isEmpty) return;
     _loadingMore = true;
     try {
-      final more = await _repository.fetchVideoFeed(
-        before: _items.last.video.createdAt,
+      final more = _shuffled(
+        await _repository.fetchVideoFeed(before: _oldestLoadedAt),
       );
       final liked = await _repository.fetchLikedVideoIds(
         more.map((item) => item.video.id).toList(),
@@ -140,11 +163,52 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
         _followedMusicianIds.addAll(followed);
         _reachedEnd = more.isEmpty;
       });
+      _trackOldest(more);
     } catch (_) {
       // Silent: the feed just stops growing for this session; scrolling
       // back up to already-loaded videos still works fine.
     } finally {
       _loadingMore = false;
+    }
+  }
+
+  /// Full reset + reload — the only way this screen ever sees videos
+  /// uploaded by someone else *after* it first mounted, since [HomeShell]
+  /// keeps it alive via `IndexedStack` and [initState]'s [_loadInitial]
+  /// never runs again on its own. Triggered silently from
+  /// [didUpdateWidget] every time the user swipes back to this tab.
+  Future<void> _refresh() async {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    _controllers.clear();
+    _items.clear();
+    _likedVideoIds.clear();
+    _followedMusicianIds.clear();
+    _oldestLoadedAt = null;
+    _reachedEnd = false;
+    _currentIndex = 0;
+    if (_pageController.hasClients) _pageController.jumpToPage(0);
+    _loading = true;
+    await _loadInitial();
+  }
+
+  /// Randomizes one fetched batch so consecutive uploads from the same
+  /// musician don't land on several swipes in a row — the repository
+  /// itself still orders by `created_at desc` (needed for [_trackOldest]'s
+  /// pagination cursor to make sense); only the on-screen order is shuffled.
+  List<VideoFeedItem> _shuffled(List<VideoFeedItem> items) =>
+      List<VideoFeedItem>.of(items)..shuffle();
+
+  /// Extends [_oldestLoadedAt] backward with the oldest `created_at` in
+  /// [batch] — read before shuffling, so [_loadMore]'s `before` cursor
+  /// always advances correctly regardless of on-screen order.
+  void _trackOldest(List<VideoFeedItem> batch) {
+    for (final item in batch) {
+      final createdAt = item.video.createdAt;
+      if (_oldestLoadedAt == null || createdAt.isBefore(_oldestLoadedAt!)) {
+        _oldestLoadedAt = createdAt;
+      }
     }
   }
 
@@ -210,6 +274,13 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
 
   Future<void> _contactWhatsApp(VideoFeedItem item) async {
     if (!item.hasPhone) return;
+    // Same gate as [DashboardScreen._contact]/[MusicianDetailScreen._contact]:
+    // watching the feed never required a finished profile, only contacting does.
+    if (!await _repository.currentProfileCanContact()) {
+      if (!mounted) return;
+      await showCompleteProfilePrompt(context);
+      return;
+    }
     final launched = await launchUrl(
       item.whatsappUri,
       mode: LaunchMode.externalApplication,
