@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Mussy (dev)",
+      "request": "launch",
+      "type": "dart",
+      "toolArgs": [
+        "--dart-define=SUPABASE_URL=tu_supabase_url_aqui",
+        "--dart-define=SUPABASE_ANON_KEY=tu_supabase_anon_key_aqui"
+      ]
+    }
+  ]
+}

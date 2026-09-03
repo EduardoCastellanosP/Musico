@@ -15,12 +15,14 @@ class ProfileInfoCard extends StatelessWidget {
     required this.cityController,
     required this.phoneController,
     required this.experienceYearsController,
+    required this.youtubeChannelController,
   });
 
   final TextEditingController fullNameController;
   final TextEditingController cityController;
   final TextEditingController phoneController;
   final TextEditingController experienceYearsController;
+  final TextEditingController youtubeChannelController;
 
   @override
   Widget build(BuildContext context) {
@@ -102,6 +104,27 @@ class ProfileInfoCard extends StatelessWidget {
           _FieldLabel('Teléfono (WhatsApp)'),
           const SizedBox(height: 6),
           PhoneInputField(controller: phoneController),
+          const SizedBox(height: 16),
+          _FieldLabel('Canal de YouTube (opcional)'),
+          const SizedBox(height: 6),
+          TextField(
+            controller: youtubeChannelController,
+            keyboardType: TextInputType.url,
+            style: theme.textTheme.bodyLarge,
+            decoration: const InputDecoration(
+              hintText: 'youtube.com/@tucanal',
+              prefixIcon: Icon(Icons.smart_display_outlined),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Tus últimos videos se mostrarán automáticamente en tu perfil. '
+            'Si no aparecen, pega directamente tu Channel ID (empieza por "UC...", '
+            'lo encuentras en Studio → Configuración → Canal → sica).',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: extension?.textSecondary,
+            ),
+          ),
         ],
       ),
     );

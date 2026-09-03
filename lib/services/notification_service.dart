@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart' show Color, WidgetsFlutterBinding;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -270,10 +269,9 @@ Future<SupabaseClient> _ensureSupabaseClient() async {
   try {
     return Supabase.instance.client;
   } catch (_) {
-    await dotenv.load(fileName: '.env');
     await Supabase.initialize(
-      url: dotenv.get('SUPABASE_URL'),
-      anonKey: dotenv.get('SUPABASE_ANON_KEY'),
+      url: const String.fromEnvironment('SUPABASE_URL'),
+      anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
     );
     return Supabase.instance.client;
   }

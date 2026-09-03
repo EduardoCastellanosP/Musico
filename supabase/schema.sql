@@ -62,6 +62,11 @@ alter table public.profiles
 alter table public.profiles
   add column if not exists availability_note text not null default '';
 
+alter table public.profiles
+  add column if not exists youtube_channel text not null default '';
+
+comment on column public.profiles.youtube_channel is 'Canal de YouTube del músico (URL completa, @handle o channel_id) — alimenta la lectura automática de su feed RSS de videos.';
+
 -- Backfill único: copia los valores escalares existentes a los nuevos
 -- arreglos antes de retirar las columnas viejas `instrument`/`genre`. El
 -- bloque completo es un no-op seguro en instalaciones nuevas, donde esas

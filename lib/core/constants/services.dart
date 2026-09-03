@@ -11,6 +11,7 @@ abstract final class MusicianServices {
     'Sonido',
     'Ensayaderos',
     'Iluminación',
+    'Sesion de Grabación',
     'Ingeniero de sonido',
     'Roadie',
     'Presentador',

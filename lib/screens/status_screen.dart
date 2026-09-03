@@ -54,6 +54,8 @@ class _StatusScreenState extends State<StatusScreen>
       TextEditingController();
   final TextEditingController _serviceDescriptionController =
       TextEditingController();
+  final TextEditingController _youtubeChannelController =
+      TextEditingController();
 
   Musician? _profile;
   MusicianStats _stats = MusicianStats.zero;
@@ -125,6 +127,7 @@ class _StatusScreenState extends State<StatusScreen>
     _phoneController.dispose();
     _availabilityNoteController.dispose();
     _serviceDescriptionController.dispose();
+    _youtubeChannelController.dispose();
     super.dispose();
   }
 
@@ -166,6 +169,7 @@ class _StatusScreenState extends State<StatusScreen>
       _selectedServices = List<String>.from(profile.services);
       _availabilityNoteController.text = profile.availabilityNote;
       _serviceDescriptionController.text = profile.serviceDescription;
+      _youtubeChannelController.text = profile.youtubeChannel;
       _availableFrom = _parseTime(profile.availableFrom);
       _availableTo = _parseTime(profile.availableTo);
       _loading = false;
@@ -655,6 +659,7 @@ class _StatusScreenState extends State<StatusScreen>
       final statusMessage = _messageController.text.trim();
       final availabilityNote = _availabilityNoteController.text.trim();
       final serviceDescription = _serviceDescriptionController.text.trim();
+      final youtubeChannel = _youtubeChannelController.text.trim();
       final availableFrom = _formatTime(_availableFrom);
       final availableTo = _formatTime(_availableTo);
       // ponytail: franja horaria oculta para v1 — el switch ya escribió
@@ -682,6 +687,7 @@ class _StatusScreenState extends State<StatusScreen>
           services: _selectedServices,
           serviceDescription: serviceDescription,
           coverageCities: _coverageCities,
+          youtubeChannel: youtubeChannel,
         ),
       ]);
 
@@ -708,6 +714,7 @@ class _StatusScreenState extends State<StatusScreen>
           services: _selectedServices,
           serviceDescription: serviceDescription,
           coverageCities: _coverageCities,
+          youtubeChannel: youtubeChannel,
           isFree: _isFree,
           statusMessage: statusMessage,
           availableFrom: availableFrom,
@@ -822,6 +829,7 @@ class _StatusScreenState extends State<StatusScreen>
                     cityController: _cityController,
                     experienceYearsController: _experienceYearsController,
                     phoneController: _phoneController,
+                    youtubeChannelController: _youtubeChannelController,
                   ),
                   const SizedBox(height: 4),
                   Text(

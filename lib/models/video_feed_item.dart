@@ -1,3 +1,5 @@
+import '../services/youtube_rss_service.dart';
+import 'musician.dart';
 import 'musician_video.dart';
 
 /// One card in the Reels-style [VideoFeedScreen]: a [MusicianVideo] plus
@@ -5,6 +7,12 @@ import 'musician_video.dart';
 /// `MusicianRepository.fetchVideoFeed`) to render the overlay and let a
 /// viewer contact them — a full [Musician] carries fields the feed never
 /// shows and would cost an unnecessary embed of its own `musician_videos`.
+///
+/// [youtubeVideoId] is set instead for a card sourced from a musician's
+/// linked YouTube channel (see [VideoFeedItem.youtube]) — [video] is still
+/// populated with a synthetic row (id prefixed `yt:`) so every other field
+/// on the card keeps working, but it has no real `musician_videos` row, so
+/// liking/view-counting it against Supabase is a harmless no-op.
 class VideoFeedItem {
   const VideoFeedItem({
     required this.video,
@@ -17,6 +25,8 @@ class VideoFeedItem {
     required this.instruments,
     required this.genres,
     required this.services,
+    this.youtubeVideoId,
+    this.youtubeAspectRatio = 16 / 9,
   });
 
   factory VideoFeedItem.fromJson(Map<String, dynamic> json) {
@@ -37,6 +47,38 @@ class VideoFeedItem {
     );
   }
 
+  /// A card for [musician]'s latest YouTube upload — mixed into the feed
+  /// alongside native [fromJson] cards by `VideoFeedScreenState._loadInitial`.
+  /// [aspectRatio] is the video's real width/height (see
+  /// `YoutubeRssService.fetchAspectRatio`) so a vertical Short renders
+  /// vertically instead of pillarboxed into a fixed 16:9 frame.
+  factory VideoFeedItem.youtube({
+    required Musician musician,
+    required YoutubeVideo ytVideo,
+    double aspectRatio = 16 / 9,
+  }) {
+    return VideoFeedItem(
+      video: MusicianVideo(
+        id: 'yt:${ytVideo.videoId}',
+        musicianId: musician.id,
+        videoUrl: ytVideo.watchUrl,
+        viewsCount: 0,
+        createdAt: ytVideo.publishedAt ?? DateTime.now(),
+      ),
+      musicianId: musician.id,
+      musicianName: musician.fullName,
+      avatarUrl: musician.avatarUrl,
+      city: musician.city,
+      phone: musician.phone,
+      isFree: musician.isFree,
+      instruments: musician.instruments,
+      genres: musician.genres,
+      services: musician.services,
+      youtubeVideoId: ytVideo.videoId,
+      youtubeAspectRatio: aspectRatio,
+    );
+  }
+
   static List<String> _stringList(dynamic value) =>
       (value as List<dynamic>?)?.map((item) => item as String).toList() ??
       const [];
@@ -51,6 +93,13 @@ class VideoFeedItem {
   final List<String> instruments;
   final List<String> genres;
   final List<String> services;
+  final String? youtubeVideoId;
+
+  /// Real width/height for [youtubeVideoId] — see [VideoFeedItem.youtube].
+  /// Meaningless (default 16:9) on a native card.
+  final double youtubeAspectRatio;
+
+  bool get isYoutube => youtubeVideoId != null;
 
   String get _digitsOnlyPhone => phone.replaceAll(RegExp(r'[^0-9]'), '');
 

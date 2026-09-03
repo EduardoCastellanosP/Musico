@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'core/security/secure_local_storage.dart';
@@ -12,25 +11,12 @@ import 'services/notification_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await dotenv.load(fileName: '.env');
-
   await Supabase.initialize(
-    url: dotenv.get('SUPABASE_URL'),
-    anonKey: dotenv.get('SUPABASE_ANON_KEY'),
+    url: const String.fromEnvironment('SUPABASE_URL'),
+    anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
     authOptions: FlutterAuthClientOptions(
       localStorage: SecureLocalStorage(),
     ),
-    debug: true,
-  );
-
-  Supabase.instance.client.auth.onAuthStateChange.listen(
-    (data) {
-      print('GOOGLE OAUTH RESPONSE:  ${data.event}');
-      print('SESSION: ${data.session}');
-    },
-    onError: (error, stackTrace) {
-      print('GOOGLE OAUTH ERROR: $error');
-    },
   );
 
   await NotificationService.instance.initialize();

@@ -42,6 +42,9 @@ android/key.properties
 # Environment variables (contains Supabase credentials, never commit)
 .env
 
+# VS Code launch config (contains Supabase credentials via --dart-define, never commit)
+.vscode/launch.json
+
 # Symbolication related
 app.*.symbols
 

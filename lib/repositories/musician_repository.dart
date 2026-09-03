@@ -191,6 +191,22 @@ class MusicianRepository {
     return rows.map(VideoFeedItem.fromJson).toList();
   }
 
+  /// A handful of musicians who've linked a YouTube channel — [VideoFeedScreen]
+  /// pulls each one's latest upload (via [YoutubeRssService]) to mix into the
+  /// feed alongside natively-uploaded videos. Only fetched on the initial
+  /// load/refresh, not [fetchVideoFeed]'s `before`-cursor pagination: YouTube's
+  /// RSS feed has no cursor of its own to page against natively-uploaded videos.
+  Future<List<Musician>> fetchMusiciansWithYoutubeChannel({int limit = 6}) async {
+    final rows = await _client
+        .from('profiles')
+        .select('id, full_name, avatar_url, city, phone, is_free, '
+            'instruments, genres, services, youtube_channel')
+        .not('youtube_channel', 'is', null)
+        .neq('youtube_channel', '')
+        .limit(limit);
+    return rows.map(Musician.fromJson).toList();
+  }
+
   /// Whether [phone] (already in `+57XXXXXXXXXX` form) is already on some
   /// *other* profile — called from [StatusScreen._save] before writing, so
   /// two musicians never end up sharing one WhatsApp contact number.
@@ -253,6 +269,7 @@ class MusicianRepository {
     required List<String> services,
     required String serviceDescription,
     required List<String> coverageCities,
+    String? youtubeChannel,
   }) async {
     final uid = _requireUserId();
     await _client
@@ -267,6 +284,7 @@ class MusicianRepository {
           'services': services,
           'service_description': serviceDescription,
           'coverage_cities': coverageCities,
+          if (youtubeChannel != null) 'youtube_channel': youtubeChannel,
         })
         .eq('id', uid);
   }

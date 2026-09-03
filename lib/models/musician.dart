@@ -33,6 +33,7 @@ class Musician {
     required this.photos,
     required this.videos,
     required this.lastMediaAt,
+    this.youtubeChannel = '',
   });
 
   factory Musician.fromJson(Map<String, dynamic> json) {
@@ -66,6 +67,7 @@ class Musician {
       lastMediaAt: json['last_media_at'] != null
           ? DateTime.tryParse(json['last_media_at'] as String)
           : null,
+      youtubeChannel: json['youtube_channel'] as String? ?? '',
     );
   }
 
@@ -156,6 +158,11 @@ class Musician {
   /// they've never uploaded anything.
   final DateTime? lastMediaAt;
 
+  /// Full channel URL, `@handle` or bare channel id — feeds
+  /// `YoutubeRssService` to auto-populate [MusicianDetailScreen]'s "Videos
+  /// de YouTube" section. Empty when the musician hasn't linked a channel.
+  final String youtubeChannel;
+
   bool get canAddMorePhotos => photos.length < MediaLimits.maxPhotos;
 
   /// True within 48h of the musician's last portfolio upload — the window
@@ -224,6 +231,7 @@ class Musician {
     List<String>? photos,
     List<MusicianVideo>? videos,
     DateTime? lastMediaAt,
+    String? youtubeChannel,
   }) {
     return Musician(
       id: id,
@@ -249,6 +257,7 @@ class Musician {
       photos: photos ?? this.photos,
       videos: videos ?? this.videos,
       lastMediaAt: lastMediaAt ?? this.lastMediaAt,
+      youtubeChannel: youtubeChannel ?? this.youtubeChannel,
     );
   }
 
