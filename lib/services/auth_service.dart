@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Wraps the Supabase Auth calls needed by the login flow so the UI layer
@@ -25,12 +27,28 @@ class AuthService {
       authScreenLaunchMode: LaunchMode.externalApplication,
     );
 
-    print('GOOGLE OAUTH RESPONSE: $response');
+    debugPrint('GOOGLE OAUTH RESPONSE: $response');
 
     return response;
+  } on AuthException catch (e, stack) {
+    // Supabase rejected the request itself (bad provider config, redirect
+    // URL not in the allow-list, disabled provider, etc).
+    debugPrint(
+      'SUPABASE AUTH ERROR: message="${e.message}" statusCode=${e.statusCode} code=${e.code}',
+    );
+    debugPrint('$stack');
+    rethrow;
+  } on PlatformException catch (e, stack) {
+    // Thrown by the underlying Android/url_launcher plugin before Supabase
+    // even gets involved, e.g. no browser/Custom Tabs provider available.
+    debugPrint(
+      'PLATFORM EXCEPTION: code=${e.code} message="${e.message}" details=${e.details}',
+    );
+    debugPrint('$stack');
+    rethrow;
   } catch (e, stack) {
-    print('GOOGLE LOGIN ERROR: $e');
-    print('$stack');
+    debugPrint('GOOGLE LOGIN ERROR (unknown): $e');
+    debugPrint('$stack');
     rethrow;
   }
 }

@@ -1,9 +1,9 @@
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_compress/video_compress.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/constants/media_limits.dart';
 import '../core/constants/services.dart';
 import '../core/theme/app_theme.dart';
@@ -27,7 +27,9 @@ import 'widgets/status/service_inventory_card.dart';
 import 'widgets/status/services_card.dart';
 import 'widgets/status/stats_panel.dart';
 import 'widgets/status/status_switch_card.dart';
+import 'widgets/status/whatsapp_visibility_card.dart';
 import 'auth_gate.dart';
+import 'video_trimmer_screen.dart';
 
 /// "Mi Estado" — where a musician controls their own availability. Every
 /// field here maps 1:1 to a column on their `profiles` row; saving performs
@@ -68,6 +70,7 @@ class _StatusScreenState extends State<StatusScreen>
   List<String> _selectedGenres = [];
   List<String> _selectedServices = [];
   bool _isFree = true;
+  bool _showWhatsapp = false;
   bool _loading = true;
   bool _saving = false;
   bool _uploadingPhoto = false;
@@ -158,6 +161,7 @@ class _StatusScreenState extends State<StatusScreen>
       _photos = List<String>.from(profile.photos);
       _videos = List<MusicianVideo>.from(profile.videos);
       _isFree = profile.isFree;
+      _showWhatsapp = profile.showWhatsapp;
       _messageController.text = profile.statusMessage;
       _fullNameController.text = profile.fullName;
       _cityController.text = profile.city;
@@ -226,6 +230,38 @@ class _StatusScreenState extends State<StatusScreen>
       if (!mounted) return;
       setState(() => _isFree = previous);
       _showMessage('No pudimos actualizar tu disponibilidad. Intenta de nuevo.');
+    }
+  }
+
+  /// "Poner mi WhatsApp público" → ON: blocks the switch until the user
+  /// accepts [showWhatsappLiabilityWaiver] — nothing is written to
+  /// Supabase, and the switch doesn't move, unless they tap "Acepto y
+  /// Activar", which then calls `accept_whatsapp_public_consent` (see
+  /// `supabase/schema.sql` section 15) to log the consent and flip the
+  /// column atomically.
+  Future<void> _requestEnableShowWhatsapp() async {
+    final accepted = await showWhatsappLiabilityWaiver(context);
+    if (!accepted) return;
+    try {
+      await _repository.acceptWhatsappPublicConsent();
+      if (!mounted) return;
+      setState(() => _showWhatsapp = true);
+    } catch (_) {
+      if (!mounted) return;
+      _showMessage('No pudimos activar tu WhatsApp público. Intenta de nuevo.');
+    }
+  }
+
+  /// → OFF: no confirmation needed, optimistic with rollback like
+  /// [_toggleAvailability].
+  Future<void> _disableShowWhatsapp() async {
+    setState(() => _showWhatsapp = false);
+    try {
+      await _repository.disableShowWhatsapp();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _showWhatsapp = true);
+      _showMessage('No pudimos actualizar tu WhatsApp público. Intenta de nuevo.');
     }
   }
 
@@ -404,27 +440,33 @@ class _StatusScreenState extends State<StatusScreen>
     }
   }
 
-  /// Picks a local video, compresses it on-device (`video_compress`), then
-  /// uploads the compressed file — mirrors [_addPhoto]'s pick/upload shape,
-  /// with a compression pass in between. `VideoCompress.deleteAllCache()`
-  /// in `finally` keeps the compressed temp file from lingering on disk
-  /// after the upload finishes (success or not).
+  /// Picks a local video, trims it locally if it's over
+  /// [MediaLimits.maxVideoDuration] (see [VideoTrimmerScreen]), compresses
+  /// the result on-device (`video_compress`), then uploads the compressed
+  /// file. `VideoCompress.deleteAllCache()` in `finally` keeps the
+  /// compressed temp file from lingering on disk after the upload finishes
+  /// (success or not).
   Future<void> _addVideo() async {
     final XFile? picked = await _imagePicker.pickVideo(
       source: ImageSource.gallery,
     );
     if (picked == null) return;
 
+    File videoFile = File(picked.path);
     final maxSeconds = MediaLimits.maxVideoDuration.inSeconds;
     try {
       final info = await VideoCompress.getMediaInfo(picked.path);
       final durationInSeconds = (info.duration ?? 0) / 1000;
 
       if (durationInSeconds > maxSeconds) {
-        _showMessage(
-          'El video es muy largo. Tiene que ser de máximo ${maxSeconds ~/ 60} minutos.',
+        if (!mounted) return;
+        final trimmed = await Navigator.of(context).push<File>(
+          MaterialPageRoute(
+            builder: (_) => VideoTrimmerScreen(videoFile: videoFile),
+          ),
         );
-        return;
+        if (trimmed == null) return;
+        videoFile = trimmed;
       }
     } catch (_) {
       // Si por alguna razón no se puede leer la info, dejamos continuar o manejamos el error
@@ -434,7 +476,7 @@ class _StatusScreenState extends State<StatusScreen>
     _showMessage('Comprimiendo video, esto puede tardar un momento...');
     try {
       final info = await VideoCompress.compressVideo(
-        picked.path,
+        videoFile.path,
         quality: VideoQuality.MediumQuality,
         deleteOrigin: false,
       );
@@ -445,8 +487,8 @@ class _StatusScreenState extends State<StatusScreen>
 
       _showMessage('Subiendo video...');
       final bytes = await compressedFile.readAsBytes();
-      final fileExt = picked.path.contains('.')
-          ? picked.path.split('.').last
+      final fileExt = videoFile.path.contains('.')
+          ? videoFile.path.split('.').last
           : 'mp4';
       final video = await _repository.addVideo(
         bytes: bytes,
@@ -842,6 +884,12 @@ class _StatusScreenState extends State<StatusScreen>
                   StatusSwitchCard(
                     isFree: _isFree,
                     onChanged: _toggleAvailability,
+                  ),
+                  const SizedBox(height: 16),
+                  WhatsappVisibilityCard(
+                    value: _showWhatsapp,
+                    onRequestEnable: _requestEnableShowWhatsapp,
+                    onDisable: _disableShowWhatsapp,
                   ),
                   // ponytail: franja horaria / "ocupado hasta" oculta para v1.
                   // const SizedBox(height: 16),

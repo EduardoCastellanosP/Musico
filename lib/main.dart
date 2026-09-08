@@ -1,7 +1,5 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter/foundation.dart';
 import 'core/security/secure_local_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_notifier.dart';

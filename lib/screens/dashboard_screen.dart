@@ -7,6 +7,7 @@ import '../core/theme/app_theme.dart';
 import '../models/musician.dart';
 import '../models/musician_stats.dart';
 import '../repositories/musician_repository.dart';
+import 'chat_screen.dart';
 import 'musician_detail_screen.dart';
 import 'status_screen.dart';
 import 'widgets/complete_profile_prompt.dart';
@@ -240,40 +241,42 @@ class _DashboardScreenState extends State<DashboardScreen>
     _loadMusicians();
   }
 
-  Future<void> _contact(Musician musician, {required bool isWhatsApp}) async {
-  // Browsing the directory never requires a finished profile — only
-  // reaching out to someone does. See [Musician.hasCompleteProfile].
-  if (!(_currentProfile?.hasCompleteProfile ?? false)) {
-    await showCompleteProfilePrompt(context);
-    return;
+  /// El número del músico ya no se expone directamente (privacidad):
+  /// "Chatear" abre el chat interno. Mismo gate de perfil completo que
+  /// antes usaba WhatsApp/Llamar. See [Musician.hasCompleteProfile].
+  Future<void> _openChat(Musician musician) async {
+    if (!(_currentProfile?.hasCompleteProfile ?? false)) {
+      await showCompleteProfilePrompt(context);
+      return;
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ChatScreen(musician: musician)),
+    );
   }
 
-  final Uri uri;
+  /// "WhatsApp" — only reachable from [MusicianCard] when [musician]
+  /// opted into `show_whatsapp` (see `supabase/schema.sql` section 15,
+  /// Consent Audit Trail). Same complete-profile gate as [_openChat].
+  Future<void> _openWhatsApp(Musician musician) async {
+    if (!(_currentProfile?.hasCompleteProfile ?? false)) {
+      await showCompleteProfilePrompt(context);
+      return;
+    }
 
-  if (isWhatsApp) {
-    // 1. Limpiamos el número para asegurar que solo queden dígitos
-    final cleanPhone = musician.phone.replaceAll(RegExp(r'\D'), '');
-    
-    // 2. Creamos el mensaje con la mención a MUSSY
-    final message = '¡Hola ${musician.fullName}! Vi tu perfil y número de contacto en la app de MUSSY y me interesan tus servicios.';
-    
-    // 3. Construimos la URI con el texto codificado
-    uri = Uri.parse('https://wa.me/$cleanPhone?text=${Uri.encodeComponent(message)}');
-  } else {
-    // Si es llamada normal, mantiene su comportamiento habitual
-    uri = musician.callUri;
+    final launched = await launchUrl(
+      musician.whatsappUri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!launched) return;
+    unawaited(
+      _repository.logContactEvent(
+        musicianId: musician.id,
+        contactType: 'whatsapp',
+      ),
+    );
   }
-
-  final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-  if (!launched) return;
-
-  unawaited(
-    _repository.logContactEvent(
-      musicianId: musician.id,
-      contactType: isWhatsApp ? 'whatsapp' : 'call',
-    ),
-  );
-}
 
   @override
   Widget build(BuildContext context) {
@@ -365,8 +368,8 @@ class _DashboardScreenState extends State<DashboardScreen>
         final musician = _musicians[index];
         return MusicianCard(
           musician: musician,
-          onWhatsAppTap: () => _contact(musician, isWhatsApp: true),
-          onCallTap: () => _contact(musician, isWhatsApp: false),
+          onChatTap: () => _openChat(musician),
+          onWhatsAppTap: () => _openWhatsApp(musician),
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) => MusicianDetailScreen(musician: musician),

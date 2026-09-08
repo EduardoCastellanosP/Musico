@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
@@ -9,6 +8,7 @@ import '../core/theme/app_theme.dart';
 import '../models/video_feed_item.dart';
 import '../repositories/musician_repository.dart';
 import '../services/youtube_rss_service.dart';
+import 'chat_screen.dart';
 import 'musician_detail_screen.dart';
 import 'widgets/complete_profile_prompt.dart';
 
@@ -362,26 +362,23 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
     if (mounted) _playCurrent();
   }
 
-  Future<void> _contactWhatsApp(VideoFeedItem item) async {
-    if (!item.hasPhone) return;
-    // Same gate as [DashboardScreen._contact]/[MusicianDetailScreen._contact]:
-    // watching the feed never required a finished profile, only contacting does.
+  /// El número del músico ya no se expone directamente (privacidad):
+  /// "Chatear" abre el chat interno. Mismo gate de perfil completo que
+  /// antes usaba WhatsApp, más el mismo pausa/resume de video que
+  /// [_openProfile] ya hace al navegar fuera de esta pantalla.
+  Future<void> _openChat(VideoFeedItem item) async {
     if (!await _repository.currentProfileCanContact()) {
       if (!mounted) return;
       await showCompleteProfilePrompt(context);
       return;
     }
-    final launched = await launchUrl(
-      item.whatsappUri,
-      mode: LaunchMode.externalApplication,
+    final musician = await _repository.fetchMusicianById(item.musicianId);
+    if (!mounted || musician == null) return;
+    _pauseCurrent();
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ChatScreen(musician: musician)),
     );
-    if (!launched) return;
-    unawaited(
-      _repository.logContactEvent(
-        musicianId: item.musicianId,
-        contactType: 'whatsapp',
-      ),
-    );
+    if (mounted) _playCurrent();
   }
 
   /// Optimistic like toggle: flips [_likedVideoIds] (and therefore the
@@ -478,7 +475,7 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
           isFollowing: _followedMusicianIds.contains(item.musicianId),
           onLike: () => _toggleLike(item),
           onFollow: () => _toggleFollow(item),
-          onContact: () => _contactWhatsApp(item),
+          onContact: () => _openChat(item),
           onTapProfile: () => _openProfile(item),
         );
       },
@@ -717,20 +714,18 @@ class _VideoFeedOverlay extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: item.hasPhone ? onContact : null,
+                  onPressed: onContact,
                   style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF25D366),
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor:
-                        const Color(0xFF25D366).withValues(alpha: 0.4),
+                    backgroundColor: AppColors.accent,
+                    foregroundColor: Colors.black,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  // icon: const Icon(Icons.chat_bubble_rounded, size: 16),
+                  icon: const Icon(Icons.chat_bubble_rounded, size: 16),
                   label: const Text(
-                    'WhatsApp',
+                    'Chatear',
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                   ),
                 ),

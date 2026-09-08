@@ -1,14 +1,10 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../core/constants/whatsapp.dart';
 import '../core/theme/app_theme.dart';
 import '../models/musician.dart';
 import '../models/musician_video.dart';
 import '../repositories/musician_repository.dart';
+import 'chat_screen.dart';
 import 'in_app_video_player_screen.dart';
 import 'photo_viewer_screen.dart';
 import 'widgets/complete_profile_prompt.dart';
@@ -85,35 +81,20 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
     }
   }
 
-  Future<void> _contact({required bool isWhatsApp}) async {
-    // Same gate as [DashboardScreen._contact]: viewing this profile never
-    // required the viewer's own to be complete, only contacting does.
+  /// El número del músico ya no se expone directamente (privacidad):
+  /// contactar abre el chat interno. Mismo gate de perfil completo que
+  /// antes usaba WhatsApp/Llamar.
+  Future<void> _sendMessage() async {
     if (!await _repository.currentProfileCanContact()) {
       if (!mounted) return;
       await showCompleteProfilePrompt(context);
       return;
     }
 
-    final musician = widget.musician;
-    final uri = isWhatsApp ? musician.whatsappUri : musician.callUri;
-
-    // Validación SAST: Asegurar que el esquema de la URI sea un canal seguro/permitido
-    if (!['https', 'http', 'tel', 'whatsapp'].contains(uri.scheme)) {
-      debugPrint('🛑 SEGURIDAD: Esquema bloqueado -> ${uri.scheme}');
-      return;
-    }
-
-    if (await canLaunchUrl(uri)) {
-      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!launched) return;
-
-      unawaited(
-        _repository.logContactEvent(
-          musicianId: musician.id,
-          contactType: isWhatsApp ? 'whatsapp' : 'call',
-        ),
-      );
-    }
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ChatScreen(musician: widget.musician)),
+    );
   }
 
   void _openPhoto(String url) {
@@ -243,12 +224,7 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
                     _ActionButtonsRow(
                       isFollowing: _isFollowing,
                       onToggleFollow: _toggleFollow,
-                      onWhatsApp: musician.hasPhone
-                          ? () => _contact(isWhatsApp: true)
-                          : null,
-                      onCall: musician.hasPhone
-                          ? () => _contact(isWhatsApp: false)
-                          : null,
+                      onSendMessage: _sendMessage,
                     ),
                     const SizedBox(height: 16),
                     _FollowStatsRow(
@@ -379,21 +355,20 @@ class _FollowStatsRow extends StatelessWidget {
   }
 }
 
-/// "Siguiendo/Seguir", WhatsApp and Llamar as one evenly-distributed row —
-/// same three-column shape as [VideoFeedScreen]'s action row, for a
-/// consistent action pattern across the app.
+/// "Siguiendo/Seguir" plus a single "Enviar Mensaje" CTA — WhatsApp/Llamar
+/// were removed so the musician's phone number is never exposed directly in
+/// the directory; contacting now goes through [_MusicianDetailScreenState._sendMessage]
+/// (chat interno, pendiente de implementar).
 class _ActionButtonsRow extends StatelessWidget {
   const _ActionButtonsRow({
     required this.isFollowing,
     required this.onToggleFollow,
-    required this.onWhatsApp,
-    required this.onCall,
+    required this.onSendMessage,
   });
 
   final bool isFollowing;
   final VoidCallback onToggleFollow;
-  final VoidCallback? onWhatsApp;
-  final VoidCallback? onCall;
+  final VoidCallback onSendMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -430,45 +405,20 @@ class _ActionButtonsRow extends StatelessWidget {
         ),
         const SizedBox(width: 8),
         Expanded(
-          child: FilledButton(
-            onPressed: onWhatsApp,
+          flex: 2,
+          child: FilledButton.icon(
+            onPressed: onSendMessage,
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF25D366),
-              foregroundColor: Colors.white,
-              disabledBackgroundColor:
-                  const Color(0xFF25D366).withValues(alpha: 0.4),
+              backgroundColor: AppColors.accent,
+              foregroundColor: Colors.black,
               padding: const EdgeInsets.symmetric(vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                SvgPicture.asset('assets/images/logowpp.svg', width: 18, height: 18),
-                const SizedBox(width: 6),
-                const Text(
-                  kWhatsAppShortLabel,
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: onCall,
-            style: OutlinedButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              side: BorderSide(color: borderColor),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            icon: const Icon(Icons.call_rounded, size: 16),
+            icon: const Icon(Icons.chat_bubble_rounded, size: 16),
             label: const Text(
-              'Llamar',
+              'Enviar Mensaje',
               style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
             ),
           ),

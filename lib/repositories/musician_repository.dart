@@ -284,7 +284,7 @@ class MusicianRepository {
           'services': services,
           'service_description': serviceDescription,
           'coverage_cities': coverageCities,
-          if (youtubeChannel != null) 'youtube_channel': youtubeChannel,
+          'youtube_channel': ?youtubeChannel,
         })
         .eq('id', uid);
   }
@@ -305,6 +305,24 @@ class MusicianRepository {
   /// Confirms the auto check-out prompt: the musician's gig ended, so they
   /// go back to free and the scheduled cutoff is cleared.
   Future<void> markAsFree() => setAvailability(true);
+
+  /// Records the liability-waiver consent and flips `show_whatsapp` to
+  /// `true` atomically via the `accept_whatsapp_public_consent` SQL
+  /// function (see `supabase/schema.sql` section 15) — both writes commit
+  /// or both roll back, so a public WhatsApp badge can never exist without
+  /// its `user_consents` proof.
+  Future<void> acceptWhatsappPublicConsent() =>
+      _client.rpc('accept_whatsapp_public_consent');
+
+  /// Turns the public WhatsApp badge back off — no consent needed to opt
+  /// out, so this is a plain update like [setAvailability].
+  Future<void> disableShowWhatsapp() async {
+    final uid = _requireUserId();
+    await _client
+        .from('profiles')
+        .update({'show_whatsapp': false})
+        .eq('id', uid);
+  }
 
   /// Dismisses the auto check-out prompt with "sigo ocupado": pushes
   /// `busy_until` forward by [extra] so the prompt doesn't re-fire right away.

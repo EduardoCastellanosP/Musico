@@ -7,14 +7,17 @@ class MusicianCard extends StatelessWidget {
   const MusicianCard({
     super.key,
     required this.musician,
+    required this.onChatTap,
     required this.onWhatsAppTap,
-    required this.onCallTap,
     required this.onTap,
   });
 
   final Musician musician;
+  final VoidCallback onChatTap;
+
+  /// Only reachable when [Musician.showWhatsapp] is true — see
+  /// `supabase/schema.sql` section 15 (Consent Audit Trail).
   final VoidCallback onWhatsAppTap;
-  final VoidCallback onCallTap;
   final VoidCallback onTap;
 
   @override
@@ -50,8 +53,8 @@ class MusicianCard extends StatelessWidget {
                     flex: 68,
                     child: _MusicianCardContent(
                       musician: musician,
+                      onChatTap: onChatTap,
                       onWhatsAppTap: onWhatsAppTap,
-                      onCallTap: onCallTap,
                     ),
                   ),
                 ],
@@ -160,13 +163,13 @@ class _InitialsPlaceholder extends StatelessWidget {
 class _MusicianCardContent extends StatelessWidget {
   const _MusicianCardContent({
     required this.musician,
+    required this.onChatTap,
     required this.onWhatsAppTap,
-    required this.onCallTap,
   });
 
   final Musician musician;
+  final VoidCallback onChatTap;
   final VoidCallback onWhatsAppTap;
-  final VoidCallback onCallTap;
 
   @override
   Widget build(BuildContext context) {
@@ -245,33 +248,20 @@ class _MusicianCardContent extends StatelessWidget {
             _ServiceChip(label: serviceLine, isDark: isDark),
           ],
           const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: _ActionButton(
-                  iconWidget: SvgPicture.asset(
-                    'assets/images/logowpp.svg',
-                    width: 20,
-                    height: 20,
-                  ),
-                  label: 'Wpp',
-                  backgroundColor: const Color(0xFF25D366),
-                  foregroundColor: Colors.white,
-                  onTap: musician.hasPhone ? onWhatsAppTap : null,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _ActionButton(
-                  icon: Icons.call_rounded,
-                  label: 'Llamar',
-                  backgroundColor: AppColors.whatsAppIndigo,
-                  foregroundColor: Colors.white,
-                  onTap: musician.hasPhone ? onCallTap : null,
-                ),
-              ),
-            ],
-          ),
+          // Part 3 (Consent Audit Trail): a musician who opted into a
+          // public WhatsApp gets a compact two-button row instead of the
+          // full-width chat-only CTA — see `Musician.showWhatsapp`.
+          musician.showWhatsapp
+              ? Row(
+                  children: [
+                    Expanded(child: _ChatActionButton(onTap: onChatTap)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _WhatsAppActionButton(onTap: onWhatsAppTap),
+                    ),
+                  ],
+                )
+              : _ChatActionButton(onTap: onChatTap),
         ],
       ),
     );
@@ -399,41 +389,191 @@ class _RatingStars extends StatelessWidget {
   }
 }
 
-class _ActionButton extends StatelessWidget {
-  const _ActionButton({
-    this.icon,
-    this.iconWidget,
-    required this.label,
-    required this.backgroundColor,
-    required this.foregroundColor,
-    required this.onTap,
-  }) : assert(icon != null || iconWidget != null, 'Provide either icon or iconWidget');
+/// The dashboard card's "Chatear" CTA — a premium indigo-gradient pill with
+/// a subtle glow/border and a light press-scale, replacing the old flat
+/// [FilledButton] look. [onTap] is passed through untouched (still
+/// `MusicianCard.onChatTap`/`DashboardScreen._openChat`); only presentation
+/// changed here. `FilledButton` can't paint a gradient background, which is
+/// why this needs its own `Ink`+`InkWell` instead of reusing that widget.
+class _ChatActionButton extends StatefulWidget {
+  const _ChatActionButton({required this.onTap});
 
-  final IconData? icon;
-  final Widget? iconWidget;
-  final String label;
-  final Color backgroundColor;
-  final Color? foregroundColor;
-  final VoidCallback? onTap;
+  final VoidCallback onTap;
+
+  @override
+  State<_ChatActionButton> createState() => _ChatActionButtonState();
+}
+
+class _ChatActionButtonState extends State<_ChatActionButton> {
+  static const _borderRadius = BorderRadius.all(Radius.circular(20));
+
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (_pressed == value) return;
+    setState(() => _pressed = value);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 40,
-      child: FilledButton.icon(
-        onPressed: onTap,
-        style: FilledButton.styleFrom(
-          backgroundColor: backgroundColor,
-          foregroundColor: foregroundColor,
-          disabledBackgroundColor: backgroundColor.withValues(alpha: 0.4),
-          disabledForegroundColor: Colors.white.withValues(alpha: 0.5),
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    return AnimatedScale(
+      scale: _pressed ? 0.98 : 1,
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOut,
+      child: SizedBox(
+        height: 40,
+        child: Material(
+          color: Colors.transparent,
+          shape: const RoundedRectangleBorder(borderRadius: _borderRadius),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: _borderRadius,
+              border: Border.all(color: const Color(0x598296FF)),
+              gradient: const LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                stops: [0.0, 0.45, 1.0],
+                colors: [
+                  Color(0xFF5B7CFF),
+                  Color(0xFF3F5AF5),
+                  Color(0xFF2738E8),
+                ],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0x472D46FF),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.25),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: InkWell(
+              onTap: widget.onTap,
+              onTapDown: (_) => _setPressed(true),
+              onTapCancel: () => _setPressed(false),
+              onTapUp: (_) => _setPressed(false),
+              borderRadius: _borderRadius,
+              splashColor: Colors.white.withValues(alpha: 0.15),
+              highlightColor: Colors.white.withValues(alpha: 0.08),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.chat_bubble_rounded, size: 17, color: Colors.white),
+                    SizedBox(width: 7),
+                    Text(
+                      'Chatear',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
-        icon: iconWidget ?? Icon(icon, size: 16),
-        label: Text(
-          label,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+/// Only rendered when [Musician.showWhatsapp] is true (see the Consent
+/// Audit Trail in `supabase/schema.sql` section 15) — same pill/press-scale
+/// language as [_ChatActionButton], toned to an elegant emerald instead of
+/// WhatsApp's flat brand green so it still reads as *this app's* button.
+class _WhatsAppActionButton extends StatefulWidget {
+  const _WhatsAppActionButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  State<_WhatsAppActionButton> createState() => _WhatsAppActionButtonState();
+}
+
+class _WhatsAppActionButtonState extends State<_WhatsAppActionButton> {
+  static const _borderRadius = BorderRadius.all(Radius.circular(20));
+
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (_pressed == value) return;
+    setState(() => _pressed = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedScale(
+      scale: _pressed ? 0.98 : 1,
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOut,
+      child: SizedBox(
+        height: 40,
+        child: Material(
+          color: Colors.transparent,
+          shape: const RoundedRectangleBorder(borderRadius: _borderRadius),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: _borderRadius,
+              border: Border.all(color: const Color(0x5934D399)),
+              gradient: const LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [Color(0xFF10B981), Color(0xFF047857)],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0x3D059669),
+                  blurRadius: 16,
+                  offset: const Offset(0, 5),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.22),
+                  blurRadius: 5,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: InkWell(
+              onTap: widget.onTap,
+              onTapDown: (_) => _setPressed(true),
+              onTapCancel: () => _setPressed(false),
+              onTapUp: (_) => _setPressed(false),
+              borderRadius: _borderRadius,
+              splashColor: Colors.white.withValues(alpha: 0.15),
+              highlightColor: Colors.white.withValues(alpha: 0.08),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SvgPicture.asset(
+                      'assets/images/logowpp.svg',
+                      width: 16,
+                      height: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    const Text(
+                      'Wpp',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

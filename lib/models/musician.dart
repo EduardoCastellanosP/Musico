@@ -34,6 +34,7 @@ class Musician {
     required this.videos,
     required this.lastMediaAt,
     this.youtubeChannel = '',
+    this.showWhatsapp = false,
   });
 
   factory Musician.fromJson(Map<String, dynamic> json) {
@@ -68,6 +69,7 @@ class Musician {
           ? DateTime.tryParse(json['last_media_at'] as String)
           : null,
       youtubeChannel: json['youtube_channel'] as String? ?? '',
+      showWhatsapp: json['show_whatsapp'] as bool? ?? false,
     );
   }
 
@@ -163,6 +165,13 @@ class Musician {
   /// de YouTube" section. Empty when the musician hasn't linked a channel.
   final String youtubeChannel;
 
+  /// Opt-in flag from the "Poner mi WhatsApp público" switch in "Mi
+  /// Estado" — see `supabase/schema.sql`'s Consent Audit Trail section.
+  /// Gates whether [MusicianCard] shows a direct WhatsApp button
+  /// alongside "Chatear"; turning it on requires accepting the liability
+  /// waiver, logged to `user_consents`.
+  final bool showWhatsapp;
+
   bool get canAddMorePhotos => photos.length < MediaLimits.maxPhotos;
 
   /// True within 48h of the musician's last portfolio upload — the window
@@ -232,6 +241,7 @@ class Musician {
     List<MusicianVideo>? videos,
     DateTime? lastMediaAt,
     String? youtubeChannel,
+    bool? showWhatsapp,
   }) {
     return Musician(
       id: id,
@@ -258,6 +268,7 @@ class Musician {
       videos: videos ?? this.videos,
       lastMediaAt: lastMediaAt ?? this.lastMediaAt,
       youtubeChannel: youtubeChannel ?? this.youtubeChannel,
+      showWhatsapp: showWhatsapp ?? this.showWhatsapp,
     );
   }
 

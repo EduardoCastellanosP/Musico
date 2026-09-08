@@ -20,7 +20,6 @@ class VideoFeedItem {
     required this.musicianName,
     required this.avatarUrl,
     required this.city,
-    required this.phone,
     required this.isFree,
     required this.instruments,
     required this.genres,
@@ -39,7 +38,6 @@ class VideoFeedItem {
           : 'Músico sin nombre',
       avatarUrl: profile['avatar_url'] as String?,
       city: profile['city'] as String? ?? '',
-      phone: profile['phone'] as String? ?? '',
       isFree: profile['is_free'] as bool? ?? false,
       instruments: _stringList(profile['instruments']),
       genres: _stringList(profile['genres']),
@@ -69,7 +67,6 @@ class VideoFeedItem {
       musicianName: musician.fullName,
       avatarUrl: musician.avatarUrl,
       city: musician.city,
-      phone: musician.phone,
       isFree: musician.isFree,
       instruments: musician.instruments,
       genres: musician.genres,
@@ -88,7 +85,6 @@ class VideoFeedItem {
   final String musicianName;
   final String? avatarUrl;
   final String city;
-  final String phone;
   final bool isFree;
   final List<String> instruments;
   final List<String> genres;
@@ -100,18 +96,6 @@ class VideoFeedItem {
   final double youtubeAspectRatio;
 
   bool get isYoutube => youtubeVideoId != null;
-
-  String get _digitsOnlyPhone => phone.replaceAll(RegExp(r'[^0-9]'), '');
-
-  bool get hasPhone => _digitsOnlyPhone.isNotEmpty;
-
-  Uri get whatsappUri => Uri.parse(
-        'https://wa.me/$_digitsOnlyPhone?text=${Uri.encodeComponent(
-          '¡Hola $musicianName! Vi tu video en MUSSY y me interesan tus servicios.',
-        )}',
-      );
-
-  Uri get callUri => Uri(scheme: 'tel', path: _digitsOnlyPhone);
 
   /// Comma-joined instruments/services for the overlay's subtitle line,
   /// mirroring `Musician.instrumentsSummary`'s fallback to [services].

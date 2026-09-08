@@ -897,3 +897,236 @@ drop function if exists public.profiles_recompute_complete();
 drop function if exists public.musician_videos_recompute_owner_complete();
 drop function if exists public.recompute_profile_complete(uuid);
 alter table public.profiles drop column if exists is_complete;
+
+-- =========================================================
+-- 14. Chat interno
+-- Reemplaza la exposición directa de número de teléfono/WhatsApp en el
+-- directorio (ver `musician_detail_screen.dart`): el contacto ahora pasa por
+-- un chat 1:1 dentro de la app. `conversations` guarda un par de
+-- participantes (orden normalizado por el CHECK de abajo para que el par
+-- {A,B} nunca se duplique en ambos sentidos); `messages` cuelga de una
+-- conversación. `message_type` distingue el texto normal de los mensajes
+-- especiales que ChatScreen/ShareContactModal insertan cuando un músico
+-- decide compartir su WhatsApp o su número para llamadas dentro del chat.
+-- =========================================================
+create table if not exists public.conversations (
+  id               uuid primary key default gen_random_uuid(),
+  participant1_id  uuid not null references auth.users (id) on delete cascade,
+  participant2_id  uuid not null references auth.users (id) on delete cascade,
+  created_at       timestamptz not null default now(),
+  constraint conversations_distinct_participants check (participant1_id <> participant2_id),
+  constraint conversations_ordered_participants check (participant1_id < participant2_id),
+  constraint conversations_unique_pair unique (participant1_id, participant2_id)
+);
+
+comment on table public.conversations is 'Conversación 1:1 entre un contratante y un músico. participant1_id/participant2_id se guardan en orden (menor uuid primero) para que el par nunca se duplique.';
+
+create index if not exists conversations_participant1_idx on public.conversations (participant1_id);
+create index if not exists conversations_participant2_idx on public.conversations (participant2_id);
+
+-- Abre (o reutiliza) la conversación entre el usuario actual y `other_user_id`.
+-- `security invoker` + normalización del orden es lo que hace que dos
+-- llamadas simétricas (A abre con B, B abre con A) siempre resuelvan a la
+-- misma fila en vez de crear un duplicado.
+create or replace function public.get_or_create_conversation(other_user_id uuid)
+returns uuid
+language plpgsql
+security invoker
+as $$
+declare
+  me uuid := auth.uid();
+  p1 uuid;
+  p2 uuid;
+  conversation_id uuid;
+begin
+  if me is null then
+    raise exception 'No hay una sesión activa.';
+  end if;
+  if me = other_user_id then
+    raise exception 'No puedes iniciar una conversación contigo mismo.';
+  end if;
+
+  if me < other_user_id then
+    p1 := me;
+    p2 := other_user_id;
+  else
+    p1 := other_user_id;
+    p2 := me;
+  end if;
+
+  insert into public.conversations (participant1_id, participant2_id)
+  values (p1, p2)
+  on conflict (participant1_id, participant2_id) do nothing;
+
+  select id into conversation_id
+  from public.conversations
+  where participant1_id = p1 and participant2_id = p2;
+
+  return conversation_id;
+end;
+$$;
+
+grant execute on function public.get_or_create_conversation(uuid) to authenticated;
+
+create table if not exists public.messages (
+  id              uuid primary key default gen_random_uuid(),
+  conversation_id uuid not null references public.conversations (id) on delete cascade,
+  sender_id       uuid not null references auth.users (id) on delete cascade,
+  content         text not null check (char_length(btrim(content)) > 0),
+  message_type    text not null default 'text'
+                    check (message_type in ('text', 'whatsapp_share', 'call_share')),
+  created_at      timestamptz not null default now()
+);
+
+comment on table public.messages is 'Mensajes de un chat interno. message_type = whatsapp_share/call_share marca los mensajes especiales con los que un músico decide compartir su contacto directo dentro del chat; content trae el link https://wa.me/... o tel:... completo.';
+
+-- Migra bases de datos donde esta sección ya se había corrido con la forma
+-- anterior (`is_whatsapp_reveal boolean`) antes de introducir
+-- `message_type`: el CREATE TABLE de arriba no toca una tabla que ya
+-- existe, así que sin esto el INSERT desde ChatRepository falla contra una
+-- columna que no existe en el `messages` real.
+alter table public.messages drop column if exists is_whatsapp_reveal;
+alter table public.messages add column if not exists message_type text not null default 'text';
+do $$
+begin
+  alter table public.messages
+    add constraint messages_message_type_check
+    check (message_type in ('text', 'whatsapp_share', 'call_share'));
+exception
+  when duplicate_object then null;
+end $$;
+
+create index if not exists messages_conversation_id_created_at_idx
+  on public.messages (conversation_id, created_at);
+
+alter table public.conversations enable row level security;
+alter table public.messages enable row level security;
+
+-- Un usuario solo ve las conversaciones donde participa.
+drop policy if exists "conversations_select_participant" on public.conversations;
+create policy "conversations_select_participant"
+  on public.conversations
+  for select
+  to authenticated
+  using (auth.uid() = participant1_id or auth.uid() = participant2_id);
+
+-- Inserción directa disponible como respaldo de `get_or_create_conversation`;
+-- exige que quien inserta sea uno de los dos participantes.
+drop policy if exists "conversations_insert_participant" on public.conversations;
+create policy "conversations_insert_participant"
+  on public.conversations
+  for insert
+  to authenticated
+  with check (auth.uid() = participant1_id or auth.uid() = participant2_id);
+
+-- Solo puede leer mensajes quien participa en la conversación a la que pertenecen.
+drop policy if exists "messages_select_participant" on public.messages;
+create policy "messages_select_participant"
+  on public.messages
+  for select
+  to authenticated
+  using (
+    exists (
+      select 1 from public.conversations c
+      where c.id = messages.conversation_id
+        and (c.participant1_id = auth.uid() or c.participant2_id = auth.uid())
+    )
+  );
+
+-- Solo puede insertar mensajes, como sí mismo, quien participa en la conversación.
+drop policy if exists "messages_insert_participant" on public.messages;
+create policy "messages_insert_participant"
+  on public.messages
+  for insert
+  to authenticated
+  with check (
+    auth.uid() = sender_id
+    and exists (
+      select 1 from public.conversations c
+      where c.id = messages.conversation_id
+        and (c.participant1_id = auth.uid() or c.participant2_id = auth.uid())
+    )
+  );
+
+-- Habilita Realtime (postgres_changes) sobre `messages` para que ChatScreen
+-- reciba mensajes nuevos al instante. `alter publication ... add table` no
+-- admite "if not exists", así que el guard va en un DO block para poder
+-- re-ejecutar este archivo sin error si ya se había habilitado.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'messages'
+  ) then
+    alter publication supabase_realtime add table public.messages;
+  end if;
+end $$;
+
+-- =========================================================
+-- 15. WhatsApp público + Consent Audit Trail (LegalTech)
+-- `show_whatsapp` deja que un músico opte por exponer su número
+-- directamente en `MusicianCard` además del chat interno. Activarlo exige
+-- aceptar una exención de responsabilidad — `user_consents` es la prueba
+-- legal inmutable (append-only: solo hay policies de insert/select, nunca
+-- de update/delete) de que ese consentimiento se dio, para defender a la
+-- plataforma si un músico alega que "nunca aceptó" hacer público su
+-- contacto o asumir la responsabilidad de tratos externos.
+-- =========================================================
+alter table public.profiles add column if not exists show_whatsapp boolean not null default false;
+
+create table if not exists public.user_consents (
+  id               uuid primary key default gen_random_uuid(),
+  user_id          uuid not null references auth.users (id) on delete cascade,
+  consent_type     text not null,
+  accepted_version text not null,
+  created_at       timestamptz not null default timezone('utc'::text, now())
+);
+
+comment on table public.user_consents is 'Registro legal inmutable (append-only) de consentimientos aceptados, p. ej. la exención de responsabilidad al hacer público el WhatsApp (consent_type = ''whatsapp_public_liability_waiver''). Sin policies de update/delete a propósito: es prueba de auditoría, no debe poder editarse ni borrarse.';
+
+create index if not exists user_consents_user_id_idx on public.user_consents (user_id);
+
+alter table public.user_consents enable row level security;
+
+drop policy if exists "Users can insert their own consent logs" on public.user_consents;
+create policy "Users can insert their own consent logs"
+  on public.user_consents
+  for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users can view their own consent logs" on public.user_consents;
+create policy "Users can view their own consent logs"
+  on public.user_consents
+  for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+-- Inserta el consentimiento y activa `show_whatsapp` en una sola
+-- transacción (el cuerpo de una función plpgsql es atómico): si cualquiera
+-- de los dos pasos falla, Postgres revierte ambos, así nunca queda
+-- `show_whatsapp = true` sin su prueba de consentimiento correspondiente.
+-- Apagarlo de vuelta no requiere este RPC — es un `update` directo desde
+-- el cliente, ya cubierto por la policy "profiles_update_own" de arriba.
+create or replace function public.accept_whatsapp_public_consent()
+returns void
+language plpgsql
+security invoker
+as $$
+declare
+  me uuid := auth.uid();
+begin
+  if me is null then
+    raise exception 'No hay una sesión activa.';
+  end if;
+
+  insert into public.user_consents (user_id, consent_type, accepted_version)
+  values (me, 'whatsapp_public_liability_waiver', '1.0');
+
+  update public.profiles set show_whatsapp = true where id = me;
+end;
+$$;
+
+grant execute on function public.accept_whatsapp_public_consent() to authenticated;

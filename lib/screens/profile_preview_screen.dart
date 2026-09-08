@@ -21,8 +21,8 @@ class ProfilePreviewScreen extends StatelessWidget {
           children: [
             MusicianCard(
               musician: musician,
+              onChatTap: () {},
               onWhatsAppTap: () {},
-              onCallTap: () {},
               onTap: () {},
             ),
           ],
