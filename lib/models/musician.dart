@@ -33,8 +33,10 @@ class Musician {
     required this.photos,
     required this.videos,
     required this.lastMediaAt,
-    this.youtubeChannel = '',
     this.showWhatsapp = false,
+    this.facebookUrl,
+    this.instagramUrl,
+    this.tiktokUrl,
   });
 
   factory Musician.fromJson(Map<String, dynamic> json) {
@@ -68,8 +70,10 @@ class Musician {
       lastMediaAt: json['last_media_at'] != null
           ? DateTime.tryParse(json['last_media_at'] as String)
           : null,
-      youtubeChannel: json['youtube_channel'] as String? ?? '',
       showWhatsapp: json['show_whatsapp'] as bool? ?? false,
+      facebookUrl: json['facebook_url'] as String?,
+      instagramUrl: json['instagram_url'] as String?,
+      tiktokUrl: json['tiktok_url'] as String?,
     );
   }
 
@@ -160,17 +164,19 @@ class Musician {
   /// they've never uploaded anything.
   final DateTime? lastMediaAt;
 
-  /// Full channel URL, `@handle` or bare channel id — feeds
-  /// `YoutubeRssService` to auto-populate [MusicianDetailScreen]'s "Videos
-  /// de YouTube" section. Empty when the musician hasn't linked a channel.
-  final String youtubeChannel;
-
   /// Opt-in flag from the "Poner mi WhatsApp público" switch in "Mi
   /// Estado" — see `supabase/schema.sql`'s Consent Audit Trail section.
   /// Gates whether [MusicianCard] shows a direct WhatsApp button
   /// alongside "Chatear"; turning it on requires accepting the liability
   /// waiver, logged to `user_consents`.
   final bool showWhatsapp;
+
+  /// Public social profile links, set from "Mi Estado" — see
+  /// `supabase/schema.sql` section 16. Each is null/empty when not set;
+  /// [ProfileHeader] only renders an icon for the ones that are.
+  final String? facebookUrl;
+  final String? instagramUrl;
+  final String? tiktokUrl;
 
   bool get canAddMorePhotos => photos.length < MediaLimits.maxPhotos;
 
@@ -240,8 +246,10 @@ class Musician {
     List<String>? photos,
     List<MusicianVideo>? videos,
     DateTime? lastMediaAt,
-    String? youtubeChannel,
     bool? showWhatsapp,
+    String? facebookUrl,
+    String? instagramUrl,
+    String? tiktokUrl,
   }) {
     return Musician(
       id: id,
@@ -267,8 +275,10 @@ class Musician {
       photos: photos ?? this.photos,
       videos: videos ?? this.videos,
       lastMediaAt: lastMediaAt ?? this.lastMediaAt,
-      youtubeChannel: youtubeChannel ?? this.youtubeChannel,
       showWhatsapp: showWhatsapp ?? this.showWhatsapp,
+      facebookUrl: facebookUrl ?? this.facebookUrl,
+      instagramUrl: instagramUrl ?? this.instagramUrl,
+      tiktokUrl: tiktokUrl ?? this.tiktokUrl,
     );
   }
 

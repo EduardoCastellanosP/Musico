@@ -10,6 +10,7 @@ class MusicianVideo {
     required this.videoUrl,
     required this.viewsCount,
     required this.createdAt,
+    this.thumbnailUrl,
   });
 
   factory MusicianVideo.fromJson(Map<String, dynamic> json) {
@@ -19,6 +20,7 @@ class MusicianVideo {
       videoUrl: json['video_url'] as String,
       viewsCount: (json['views_count'] as num?)?.toInt() ?? 0,
       createdAt: DateTime.parse(json['created_at'] as String),
+      thumbnailUrl: json['thumbnail_url'] as String?,
     );
   }
 
@@ -28,6 +30,11 @@ class MusicianVideo {
   final int viewsCount;
   final DateTime createdAt;
 
+  /// Lightweight JPEG shown by [VideoFeedScreen] before the real video is
+  /// worth downloading — see `supabase/schema.sql`'s `musician_videos`
+  /// comment. Null for videos uploaded before this column existed.
+  final String? thumbnailUrl;
+
   MusicianVideo copyWith({int? viewsCount}) {
     return MusicianVideo(
       id: id,
@@ -35,6 +42,7 @@ class MusicianVideo {
       videoUrl: videoUrl,
       viewsCount: viewsCount ?? this.viewsCount,
       createdAt: createdAt,
+      thumbnailUrl: thumbnailUrl,
     );
   }
 }

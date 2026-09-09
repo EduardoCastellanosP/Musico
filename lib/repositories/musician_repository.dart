@@ -17,7 +17,7 @@ const String _videosBucket = 'musician-videos';
 /// alongside every `profiles` row — shared by [fetchMusicians] and
 /// [fetchCurrentProfile] so the two selects can't drift out of sync.
 const String _videoColumns =
-    'id, musician_id, video_url, views_count, created_at';
+    'id, musician_id, video_url, thumbnail_url, views_count, created_at';
 
 /// `profiles` columns the Reels-style feed needs for its overlay/contact
 /// buttons — a small subset of what [Musician.fromJson] parses, since the
@@ -191,22 +191,6 @@ class MusicianRepository {
     return rows.map(VideoFeedItem.fromJson).toList();
   }
 
-  /// A handful of musicians who've linked a YouTube channel — [VideoFeedScreen]
-  /// pulls each one's latest upload (via [YoutubeRssService]) to mix into the
-  /// feed alongside natively-uploaded videos. Only fetched on the initial
-  /// load/refresh, not [fetchVideoFeed]'s `before`-cursor pagination: YouTube's
-  /// RSS feed has no cursor of its own to page against natively-uploaded videos.
-  Future<List<Musician>> fetchMusiciansWithYoutubeChannel({int limit = 6}) async {
-    final rows = await _client
-        .from('profiles')
-        .select('id, full_name, avatar_url, city, phone, is_free, '
-            'instruments, genres, services, youtube_channel')
-        .not('youtube_channel', 'is', null)
-        .neq('youtube_channel', '')
-        .limit(limit);
-    return rows.map(Musician.fromJson).toList();
-  }
-
   /// Whether [phone] (already in `+57XXXXXXXXXX` form) is already on some
   /// *other* profile — called from [StatusScreen._save] before writing, so
   /// two musicians never end up sharing one WhatsApp contact number.
@@ -255,10 +239,15 @@ class MusicianRepository {
   /// Updates the logged-in musician's public profile info: name, city,
   /// contact phone, coverage cities, the [services] they offer, the
   /// [instruments]/[genres] they perform (when offering the "Músico"
-  /// service) and/or their [serviceDescription] inventory (when offering a
-  /// technical service). Separate from [updateMusicianStatus] since these
-  /// fields describe who the musician is rather than their availability
-  /// right now. RLS guarantees a musician can only ever touch their own row.
+  /// service), their [serviceDescription] inventory (when offering a
+  /// technical service), and their public social links. Separate from
+  /// [updateMusicianStatus] since these fields describe who the musician is
+  /// rather than their availability right now. RLS guarantees a musician
+  /// can only ever touch their own row.
+  ///
+  /// [facebookUrl]/[instagramUrl]/[tiktokUrl] are `null` to clear a link —
+  /// the caller ([StatusScreen._save]) is what normalizes an emptied text
+  /// field to `null` rather than an empty string.
   Future<void> updateMusicianProfile({
     required String fullName,
     required List<String> instruments,
@@ -269,7 +258,9 @@ class MusicianRepository {
     required List<String> services,
     required String serviceDescription,
     required List<String> coverageCities,
-    String? youtubeChannel,
+    String? facebookUrl,
+    String? instagramUrl,
+    String? tiktokUrl,
   }) async {
     final uid = _requireUserId();
     await _client
@@ -284,7 +275,9 @@ class MusicianRepository {
           'services': services,
           'service_description': serviceDescription,
           'coverage_cities': coverageCities,
-          'youtube_channel': ?youtubeChannel,
+          'facebook_url': facebookUrl,
+          'instagram_url': instagramUrl,
+          'tiktok_url': tiktokUrl,
         })
         .eq('id', uid);
   }
@@ -446,9 +439,14 @@ class MusicianRepository {
   /// `musician_videos_max_3` trigger, which surfaces as a thrown
   /// [PostgrestException] if the UI's own check was somehow bypassed (e.g.
   /// a race between two devices).
+  /// [thumbnailBytes] — see [VideoOptimizer.generateThumbnail] — is
+  /// optional only so a thumbnail failure never blocks the actual video
+  /// upload; when provided it's stored alongside the video and is what
+  /// [VideoFeedScreen] shows before deciding to stream the real file.
   Future<MusicianVideo> addVideo({
     required Uint8List bytes,
     required String fileExt,
+    Uint8List? thumbnailBytes,
   }) async {
     final uid = _requireUserId();
     final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
@@ -463,22 +461,47 @@ class MusicianRepository {
         );
     final videoUrl = _client.storage.from(_videosBucket).getPublicUrl(path);
 
+    String? thumbnailUrl;
+    if (thumbnailBytes != null) {
+      final thumbPath = '$uid/${DateTime.now().millisecondsSinceEpoch}_thumb.jpg';
+      await _client.storage
+          .from(_videosBucket)
+          .uploadBinary(
+            thumbPath,
+            thumbnailBytes,
+            fileOptions: const FileOptions(
+              upsert: false,
+              contentType: 'image/jpeg',
+            ),
+          );
+      thumbnailUrl = _client.storage.from(_videosBucket).getPublicUrl(thumbPath);
+    }
+
     final row = await _client
         .from('musician_videos')
-        .insert({'musician_id': uid, 'video_url': videoUrl})
+        .insert({
+          'musician_id': uid,
+          'video_url': videoUrl,
+          if (thumbnailUrl != null) 'thumbnail_url': thumbnailUrl,
+        })
         .select()
         .single();
     return MusicianVideo.fromJson(row);
   }
 
-  /// Removes both the storage object and its `musician_videos` row.
+  /// Removes both storage objects (video + thumbnail, if any) and the
+  /// `musician_videos` row.
   Future<void> removeVideo(MusicianVideo video) async {
     _requireUserId();
     const marker = '$_videosBucket/';
-    final markerIndex = video.videoUrl.indexOf(marker);
-    if (markerIndex != -1) {
-      final path = video.videoUrl.substring(markerIndex + marker.length);
-      await _client.storage.from(_videosBucket).remove([path]);
+    final paths = <String>[];
+    for (final url in [video.videoUrl, video.thumbnailUrl]) {
+      if (url == null) continue;
+      final markerIndex = url.indexOf(marker);
+      if (markerIndex != -1) paths.add(url.substring(markerIndex + marker.length));
+    }
+    if (paths.isNotEmpty) {
+      await _client.storage.from(_videosBucket).remove(paths);
     }
     await _client.from('musician_videos').delete().eq('id', video.id);
   }

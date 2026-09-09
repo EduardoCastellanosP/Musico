@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../models/musician.dart';
@@ -361,9 +363,92 @@ class _ProfileInfo extends StatelessWidget {
           //     ),
           //   ],
           // ),
+          if (_SocialLinksRow.hasAnyLink(musician)) ...[
+            const SizedBox(height: 14),
+            _SocialLinksRow(musician: musician),
+          ],
           const SizedBox(height: 18),
           _AvailabilityBanner(musician: musician),
         ],
+      ),
+    );
+  }
+}
+
+/// Facebook/Instagram/TikTok icons — conditional per link: a musician who
+/// hasn't set one simply doesn't get that icon, never a disabled/greyed
+/// placeholder. See `Musician.facebookUrl`/`instagramUrl`/`tiktokUrl`.
+class _SocialLinksRow extends StatelessWidget {
+  const _SocialLinksRow({required this.musician});
+
+  final Musician musician;
+
+  static bool hasAnyLink(Musician musician) =>
+      _isSet(musician.facebookUrl) ||
+      _isSet(musician.instagramUrl) ||
+      _isSet(musician.tiktokUrl);
+
+  static bool _isSet(String? url) => url != null && url.trim().isNotEmpty;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 14,
+      children: [
+        if (_isSet(musician.facebookUrl))
+          _SocialIconButton(
+            icon: FontAwesomeIcons.facebook,
+            color: const Color(0xFF1877F2),
+            url: musician.facebookUrl!,
+          ),
+        if (_isSet(musician.instagramUrl))
+          _SocialIconButton(
+            icon: FontAwesomeIcons.instagram,
+            color: const Color(0xFFE1306C),
+            url: musician.instagramUrl!,
+          ),
+        if (_isSet(musician.tiktokUrl))
+          _SocialIconButton(
+            icon: FontAwesomeIcons.tiktok,
+            color: isDark ? Colors.white : Colors.black,
+            url: musician.tiktokUrl!,
+          ),
+      ],
+    );
+  }
+}
+
+class _SocialIconButton extends StatelessWidget {
+  const _SocialIconButton({
+    required this.icon,
+    required this.color,
+    required this.url,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String url;
+
+  Future<void> _open() async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: color.withValues(alpha: 0.12),
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: _open,
+        customBorder: const CircleBorder(),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: FaIcon(icon, size: 18, color: color),
+        ),
       ),
     );
   }

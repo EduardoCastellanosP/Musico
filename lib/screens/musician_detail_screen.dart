@@ -11,7 +11,6 @@ import 'widgets/complete_profile_prompt.dart';
 import 'widgets/profile/media_grid.dart';
 import 'widgets/profile/people_list_sheet.dart';
 import 'widgets/profile/profile_header.dart';
-import 'widgets/profile/youtube_videos_section.dart';
 
 /// Full-screen profile a contratante sees after tapping a [MusicianCard]:
 /// [ProfileHeader] (cover photo, avatar, identity, availability) followed
@@ -250,12 +249,6 @@ class _MusicianDetailScreenState extends State<MusicianDetailScreen> {
                   videos: _videos,
                   onTapPhoto: _openPhoto,
                   onTapVideo: _openVideo,
-                ),
-              ),
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-                sliver: SliverToBoxAdapter(
-                  child: YoutubeVideosSection(channel: musician.youtubeChannel),
                 ),
               ),
               const SliverToBoxAdapter(child: SizedBox(height: 32)),

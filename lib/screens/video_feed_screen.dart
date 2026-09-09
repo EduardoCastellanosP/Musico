@@ -2,28 +2,30 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
-import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
 import '../core/theme/app_theme.dart';
 import '../models/video_feed_item.dart';
 import '../repositories/musician_repository.dart';
-import '../services/youtube_rss_service.dart';
 import 'chat_screen.dart';
 import 'musician_detail_screen.dart';
 import 'widgets/complete_profile_prompt.dart';
 
 /// Reels/TikTok-style vertical feed of every musician's uploaded videos,
-/// newest first. Only the on-screen page's [VideoPlayerController] is ever
-/// playing — [_ensureControllersAround] keeps at most 3 controllers alive
-/// (current ± 1, to make the next swipe instant) and disposes the rest, so
+/// newest first — 100% Supabase Storage, no external video source. Only
+/// the on-screen page's [VideoPlayerController] is ever playing —
+/// [_ensureControllersAround] keeps at most 3 controllers alive (current
+/// ± 1, to make the next swipe instant) and disposes the rest, so
 /// scrolling through a long feed never accumulates decoders/memory.
 ///
 /// [isActive] is [HomeShell]'s current tab selection, threaded down as a
 /// plain prop — `IndexedStack` mounts this screen immediately regardless of
 /// which tab is selected (so playback position/feed scroll survive tab
-/// switches) but has no notion of "visible on screen", so without this flag
-/// a freshly-initialized controller would start playing (with sound) the
-/// instant the app opens, before the user ever visits "Videos".
+/// switches), so without [isActive] this screen would fetch the feed *and*
+/// start buffering the first video the instant the app opens on the
+/// Directorio tab, burning Supabase Egress for videos nobody asked to see.
+/// [initState] deliberately does NOT load anything — [didUpdateWidget]'s
+/// first `isActive == true` transition is what triggers [_loadInitial],
+/// so the network cost only exists once the user actually opens "Videos".
 class VideoFeedScreen extends StatefulWidget {
   const VideoFeedScreen({super.key, required this.isActive, required this.onBack});
 
@@ -45,11 +47,6 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
 
   final List<VideoFeedItem> _items = [];
   final Map<int, VideoPlayerController> _controllers = {};
-
-  /// Parallel to [_controllers] but for [VideoFeedItem.isYoutube] pages —
-  /// a separate map since a YouTube page is driven by the iframe player's
-  /// own controller type, not [VideoPlayerController].
-  final Map<int, YoutubePlayerController> _youtubeControllers = {};
   final Set<String> _likedVideoIds = {};
   final Set<String> _followedMusicianIds = {};
 
@@ -73,7 +70,14 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
   @override
   void initState() {
     super.initState();
-    _loadInitial();
+    // Loads immediately only if this screen somehow mounts already active
+    // (defensive — `HomeShell` always starts on the Directorio tab). The
+    // normal case is `isActive: false` here, and [didUpdateWidget] below
+    // fires the real first load once the user taps "Videos".
+    if (widget.isActive) {
+      _hasBeenActive = true;
+      _loadInitial();
+    }
   }
 
   @override
@@ -81,13 +85,19 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
     super.didUpdateWidget(oldWidget);
     if (widget.isActive == oldWidget.isActive) return;
     if (widget.isActive) {
-      _playCurrent();
-      // Every time the user comes back to this tab (not the first time),
-      // silently pull whatever's new — this screen otherwise never
-      // refreshes on its own since `HomeShell` keeps it permanently
-      // mounted via `IndexedStack`.
-      if (_hasBeenActive) _refresh();
-      _hasBeenActive = true;
+      if (!_hasBeenActive) {
+        // First time ever entering the Videos tab — this is the one place
+        // the feed query and the first video's buffering actually start.
+        _hasBeenActive = true;
+        _loadInitial();
+      } else {
+        _playCurrent();
+        // Every subsequent time the user comes back to this tab, silently
+        // pull whatever's new — this screen otherwise never refreshes on
+        // its own since `HomeShell` keeps it permanently mounted via
+        // `IndexedStack`.
+        _refresh();
+      }
     } else {
       _pauseCurrent();
     }
@@ -97,9 +107,6 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
   void dispose() {
     for (final controller in _controllers.values) {
       controller.dispose();
-    }
-    for (final controller in _youtubeControllers.values) {
-      controller.close();
     }
     _pageController.dispose();
     super.dispose();
@@ -111,7 +118,6 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
   /// audio doesn't keep playing under a screen the user can't see.
   void _pauseCurrent() {
     _controllers[_currentIndex]?.pause();
-    _youtubeControllers[_currentIndex]?.pauseVideo();
   }
 
   /// Plays the current video, but only if it's actually initialized and
@@ -122,41 +128,6 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
     final controller = _controllers[_currentIndex];
     if (controller != null && controller.value.isInitialized) {
       controller.play();
-    }
-    _youtubeControllers[_currentIndex]?.playVideo();
-  }
-
-  /// One card per musician who's linked a YouTube channel, sourced from
-  /// their latest upload — mixed into the initial feed load only (see
-  /// [MusicianRepository.fetchMusiciansWithYoutubeChannel]). A musician
-  /// whose channel fails to resolve, or has no public uploads, silently
-  /// contributes no card rather than failing the whole feed load. The
-  /// outer try/catch is the same isolation: this whole step is a "nice to
-  /// have" mixed into the feed, so a Supabase hiccup here must never take
-  /// down the native videos [_loadInitial] fetches alongside it.
-  Future<List<VideoFeedItem>> _fetchYoutubeItems() async {
-    try {
-      final musicians = await _repository.fetchMusiciansWithYoutubeChannel();
-      const rssService = YoutubeRssService();
-      final items = await Future.wait(
-        musicians.map((musician) async {
-          final videos = await rssService.fetchLatestVideos(
-            musician.youtubeChannel,
-            maxResults: 1,
-          );
-          if (videos.isEmpty) return null;
-          final video = videos.first;
-          final aspectRatio = await rssService.fetchAspectRatio(video.videoId);
-          return VideoFeedItem.youtube(
-            musician: musician,
-            ytVideo: video,
-            aspectRatio: aspectRatio,
-          );
-        }),
-      );
-      return items.whereType<VideoFeedItem>().toList();
-    } catch (_) {
-      return const [];
     }
   }
 
@@ -180,9 +151,6 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
       _trackOldest(items);
       _ensureControllersAround(0);
       if (items.isNotEmpty) _countView(0);
-      // Never awaited here: YouTube is an unreliable, optional extra on top
-      // of the native feed above, which must never wait on it to appear.
-      unawaited(_mixInYoutubeItems());
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -190,16 +158,6 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
         _error = 'No pudimos cargar el feed de videos.';
       });
     }
-  }
-
-  /// Appends YouTube cards to the end of [_items] once they're ready —
-  /// tail-only so existing indices (and therefore [_controllers]/
-  /// [_youtubeControllers], both keyed by index) never shift under an
-  /// already-rendered page.
-  Future<void> _mixInYoutubeItems() async {
-    final ytItems = await _fetchYoutubeItems();
-    if (!mounted || ytItems.isEmpty) return;
-    setState(() => _items.addAll(ytItems));
   }
 
   Future<void> _loadMore() async {
@@ -282,30 +240,8 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
     for (final i in toRemove) {
       _controllers.remove(i)?.dispose();
     }
-    final toRemoveYoutube =
-        _youtubeControllers.keys.where((i) => !keep.contains(i)).toList();
-    for (final i in toRemoveYoutube) {
-      _youtubeControllers.remove(i)?.close();
-    }
 
     for (final i in keep) {
-      if (_items[i].isYoutube) {
-        final videoId = _items[i].youtubeVideoId!;
-        _youtubeControllers.putIfAbsent(
-          i,
-          () => YoutubePlayerController.fromVideoId(
-            videoId: YoutubeRssService.extractVideoId(videoId) ?? videoId,
-            autoPlay: false,
-            params: const YoutubePlayerParams(
-              showControls: false,
-              showFullscreenButton: false,
-              showVideoAnnotations: false,
-              loop: true,
-            ),
-          ),
-        );
-        continue;
-      }
       _controllers.putIfAbsent(i, () {
         final controller = VideoPlayerController.networkUrl(
           Uri.parse(_items[i].video.videoUrl),
@@ -326,13 +262,6 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
         entry.value.pause();
       }
     }
-    for (final entry in _youtubeControllers.entries) {
-      if (entry.key == index) {
-        _playCurrent();
-      } else {
-        entry.value.pauseVideo();
-      }
-    }
   }
 
   void _onPageChanged(int index) {
@@ -343,9 +272,7 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
   }
 
   void _countView(int index) {
-    final item = _items[index];
-    if (item.isYoutube) return;
-    unawaited(_repository.incrementVideoView(item.video.id));
+    unawaited(_repository.incrementVideoView(_items[index].video.id));
   }
 
   /// Opens the full public profile for [item]'s musician — pauses the
@@ -385,7 +312,6 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
   /// heart icon) immediately, fires the write in the background, and rolls
   /// the flip back only if that write fails.
   Future<void> _toggleLike(VideoFeedItem item) async {
-    if (item.isYoutube) return;
     final id = item.video.id;
     final wasLiked = _likedVideoIds.contains(id);
     setState(() {
@@ -470,7 +396,6 @@ class VideoFeedScreenState extends State<VideoFeedScreen> {
         return _VideoFeedPage(
           item: item,
           controller: _controllers[index],
-          youtubeController: _youtubeControllers[index],
           isLiked: _likedVideoIds.contains(item.video.id),
           isFollowing: _followedMusicianIds.contains(item.musicianId),
           onLike: () => _toggleLike(item),
@@ -527,11 +452,40 @@ class _BackButton extends StatelessWidget {
   }
 }
 
+/// Shown instead of a bare black screen while the real video is still
+/// buffering (or hasn't started to) — see [VideoFeedScreen]'s "thumbnail
+/// first" doc comment. Falls back to just the spinner when [url] is null
+/// (a video uploaded before `musician_videos.thumbnail_url` existed).
+class _ThumbnailPlaceholder extends StatelessWidget {
+  const _ThumbnailPlaceholder({required this.url});
+
+  final String? url;
+
+  @override
+  Widget build(BuildContext context) {
+    final thumbnailUrl = url;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (thumbnailUrl != null && thumbnailUrl.isNotEmpty)
+          Image.network(
+            thumbnailUrl,
+            fit: BoxFit.cover,
+            errorBuilder: (context, error, stackTrace) =>
+                const SizedBox.shrink(),
+          ),
+        const Center(
+          child: CircularProgressIndicator(color: AppColors.accent),
+        ),
+      ],
+    );
+  }
+}
+
 class _VideoFeedPage extends StatelessWidget {
   const _VideoFeedPage({
     required this.item,
     required this.controller,
-    required this.youtubeController,
     required this.isLiked,
     required this.isFollowing,
     required this.onLike,
@@ -542,7 +496,6 @@ class _VideoFeedPage extends StatelessWidget {
 
   final VideoFeedItem item;
   final VideoPlayerController? controller;
-  final YoutubePlayerController? youtubeController;
   final bool isLiked;
   final bool isFollowing;
   final VoidCallback onLike;
@@ -551,11 +504,6 @@ class _VideoFeedPage extends StatelessWidget {
   final VoidCallback onTapProfile;
 
   void _togglePlay() {
-    final yt = youtubeController;
-    if (yt != null) {
-      yt.value.playerState == PlayerState.playing ? yt.pauseVideo() : yt.playVideo();
-      return;
-    }
     final c = controller;
     if (c == null || !c.value.isInitialized) return;
     if (c.value.isPlaying) {
@@ -568,7 +516,6 @@ class _VideoFeedPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = controller;
-    final yt = youtubeController;
     final ready = c != null && c.value.isInitialized;
 
     return GestureDetector(
@@ -577,20 +524,7 @@ class _VideoFeedPage extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           Container(color: Colors.black),
-          if (yt != null)
-            // The official embed can't be cropped edge-to-edge like the
-            // native player below (YouTube renders its own surface at
-            // [item.youtubeAspectRatio] — vertical for a Short, 16:9
-            // otherwise) — pillar/letterboxing to fit the screen is the
-            // ceiling here, not a bug.
-            Center(
-              child: YoutubePlayer(
-                controller: yt,
-                aspectRatio: item.youtubeAspectRatio,
-                backgroundColor: Colors.black,
-              ),
-            )
-          else if (ready)
+          if (ready)
             // Fills the whole screen and crops (no letterboxing), matching
             // the TikTok/Reels "video fills the frame" look — the same
             // FittedBox(fit: cover) shape LoginScreen already uses for its
@@ -606,9 +540,12 @@ class _VideoFeedPage extends StatelessWidget {
               ),
             )
           else
-            const Center(
-              child: CircularProgressIndicator(color: AppColors.accent),
-            ),
+            // "Thumbnail first": the real video is still buffering (or
+            // hasn't started to — see `_ensureControllersAround`), so show
+            // the lightweight JPEG instead of a bare black screen. Falls
+            // back to the old spinner-on-black when a video has none
+            // (uploaded before `thumbnail_url` existed).
+            _ThumbnailPlaceholder(url: item.thumbnailUrl),
           // Bottom gradient so the overlay text/buttons stay readable
           // regardless of how bright the underlying video frame is.
           const Positioned(
@@ -681,24 +618,14 @@ class _VideoFeedOverlay extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                // A YouTube-sourced card has no `musician_videos` row to like
-                // against, so it gets a static badge here instead of a dead
-                // button — see [VideoFeedItem.youtube].
-                child: item.isYoutube
-                    ? const _OutlinedPillButton(
-                        icon: Icons.smart_display_rounded,
-                        iconColor: Colors.white,
-                        label: 'YouTube',
-                        onTap: null,
-                      )
-                    : _OutlinedPillButton(
-                        icon: isLiked
-                            ? Icons.favorite_rounded
-                            : Icons.favorite_border_rounded,
-                        iconColor: isLiked ? Colors.red : Colors.white,
-                        label: 'Me gusta',
-                        onTap: onLike,
-                      ),
+                child: _OutlinedPillButton(
+                  icon: isLiked
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  iconColor: isLiked ? Colors.red : Colors.white,
+                  label: 'Me gusta',
+                  onTap: onLike,
+                ),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -839,9 +766,6 @@ class _ProfileRow extends StatelessWidget {
   }
 }
 
-/// Bright-yellow/black genre pill — deliberately its own small widget
-/// instead of reusing the dashboard's `GenreBadge` (gold/teal, bordered),
-/// since this screen's spec calls for a solid, high-contrast pill instead.
 class _GenrePill extends StatelessWidget {
   const _GenrePill({required this.label});
 

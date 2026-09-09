@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:video_compress/video_compress.dart';
 import '../core/constants/media_limits.dart';
 import '../core/constants/services.dart';
 import '../core/theme/app_theme.dart';
+import '../core/video/video_optimizer.dart';
 import '../models/musician.dart';
 import '../models/musician_stats.dart';
 import '../models/musician_video.dart';
@@ -25,6 +27,7 @@ import 'widgets/profile/profile_header.dart';
 import 'widgets/status/profile_info_card.dart';
 import 'widgets/status/service_inventory_card.dart';
 import 'widgets/status/services_card.dart';
+import 'widgets/status/social_links_card.dart';
 import 'widgets/status/stats_panel.dart';
 import 'widgets/status/status_switch_card.dart';
 import 'widgets/status/whatsapp_visibility_card.dart';
@@ -56,8 +59,9 @@ class _StatusScreenState extends State<StatusScreen>
       TextEditingController();
   final TextEditingController _serviceDescriptionController =
       TextEditingController();
-  final TextEditingController _youtubeChannelController =
-      TextEditingController();
+  final TextEditingController _facebookController = TextEditingController();
+  final TextEditingController _instagramController = TextEditingController();
+  final TextEditingController _tiktokController = TextEditingController();
 
   Musician? _profile;
   MusicianStats _stats = MusicianStats.zero;
@@ -130,7 +134,9 @@ class _StatusScreenState extends State<StatusScreen>
     _phoneController.dispose();
     _availabilityNoteController.dispose();
     _serviceDescriptionController.dispose();
-    _youtubeChannelController.dispose();
+    _facebookController.dispose();
+    _instagramController.dispose();
+    _tiktokController.dispose();
     super.dispose();
   }
 
@@ -173,7 +179,9 @@ class _StatusScreenState extends State<StatusScreen>
       _selectedServices = List<String>.from(profile.services);
       _availabilityNoteController.text = profile.availabilityNote;
       _serviceDescriptionController.text = profile.serviceDescription;
-      _youtubeChannelController.text = profile.youtubeChannel;
+      _facebookController.text = profile.facebookUrl ?? '';
+      _instagramController.text = profile.instagramUrl ?? '';
+      _tiktokController.text = profile.tiktokUrl ?? '';
       _availableFrom = _parseTime(profile.availableFrom);
       _availableTo = _parseTime(profile.availableTo);
       _loading = false;
@@ -193,6 +201,13 @@ class _StatusScreenState extends State<StatusScreen>
     final hour = time.hour.toString().padLeft(2, '0');
     final minute = time.minute.toString().padLeft(2, '0');
     return '$hour:$minute';
+  }
+
+  /// Trims [value] and normalizes it to `null` when empty — how an emptied
+  /// social-link field clears the column instead of storing `''`.
+  static String? _emptyToNull(String value) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? null : trimmed;
   }
 
   /// Strips the "+57" country code the app stores in `phone` so the field
@@ -475,14 +490,21 @@ class _StatusScreenState extends State<StatusScreen>
     setState(() => _uploadingVideo = true);
     _showMessage('Comprimiendo video, esto puede tardar un momento...');
     try {
-      final info = await VideoCompress.compressVideo(
+      // Egress control: 720p, no exception — see [VideoOptimizer].
+      final compressedFile = await VideoOptimizer.compressForUpload(
         videoFile.path,
-        quality: VideoQuality.MediumQuality,
-        deleteOrigin: false,
       );
-      final compressedFile = info?.file;
-      if (compressedFile == null) {
-        throw StateError('No pudimos comprimir el video.');
+
+      // "Thumbnail first" for the feed — best-effort: a failed thumbnail
+      // must never block the actual video upload.
+      Uint8List? thumbnailBytes;
+      try {
+        final thumbnailFile = await VideoOptimizer.generateThumbnail(
+          compressedFile.path,
+        );
+        thumbnailBytes = await thumbnailFile.readAsBytes();
+      } catch (_) {
+        thumbnailBytes = null;
       }
 
       _showMessage('Subiendo video...');
@@ -493,6 +515,7 @@ class _StatusScreenState extends State<StatusScreen>
       final video = await _repository.addVideo(
         bytes: bytes,
         fileExt: fileExt.toLowerCase(),
+        thumbnailBytes: thumbnailBytes,
       );
       if (!mounted) return;
       setState(() => _videos = [..._videos, video]);
@@ -666,6 +689,27 @@ class _StatusScreenState extends State<StatusScreen>
     if (_videos.isEmpty) {
       return 'Sube al menos 1 video para poder publicar tu perfil.';
     }
+    return _validateSocialUrl(_facebookController.text, 'Facebook') ??
+        _validateSocialUrl(_instagramController.text, 'Instagram') ??
+        _validateSocialUrl(_tiktokController.text, 'TikTok');
+  }
+
+  /// Basic format check for the optional social links: empty is fine (the
+  /// field is optional), otherwise it must parse as an absolute http(s)
+  /// URL. Intentionally doesn't check the host is actually
+  /// facebook.com/instagram.com/tiktok.com — mobile share links
+  /// (`vm.tiktok.com`, `fb.me`, regional domains) are common and valid.
+  static String? _validateSocialUrl(String value, String platform) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    final uri = Uri.tryParse(trimmed);
+    final isValid =
+        uri != null &&
+        (uri.scheme == 'http' || uri.scheme == 'https') &&
+        uri.host.isNotEmpty;
+    if (!isValid) {
+      return 'El enlace de $platform no es una URL válida (debe empezar con https://).';
+    }
     return null;
   }
 
@@ -701,7 +745,9 @@ class _StatusScreenState extends State<StatusScreen>
       final statusMessage = _messageController.text.trim();
       final availabilityNote = _availabilityNoteController.text.trim();
       final serviceDescription = _serviceDescriptionController.text.trim();
-      final youtubeChannel = _youtubeChannelController.text.trim();
+      final facebookUrl = _emptyToNull(_facebookController.text);
+      final instagramUrl = _emptyToNull(_instagramController.text);
+      final tiktokUrl = _emptyToNull(_tiktokController.text);
       final availableFrom = _formatTime(_availableFrom);
       final availableTo = _formatTime(_availableTo);
       // ponytail: franja horaria oculta para v1 — el switch ya escribió
@@ -729,7 +775,9 @@ class _StatusScreenState extends State<StatusScreen>
           services: _selectedServices,
           serviceDescription: serviceDescription,
           coverageCities: _coverageCities,
-          youtubeChannel: youtubeChannel,
+          facebookUrl: facebookUrl,
+          instagramUrl: instagramUrl,
+          tiktokUrl: tiktokUrl,
         ),
       ]);
 
@@ -756,7 +804,9 @@ class _StatusScreenState extends State<StatusScreen>
           services: _selectedServices,
           serviceDescription: serviceDescription,
           coverageCities: _coverageCities,
-          youtubeChannel: youtubeChannel,
+          facebookUrl: facebookUrl,
+          instagramUrl: instagramUrl,
+          tiktokUrl: tiktokUrl,
           isFree: _isFree,
           statusMessage: statusMessage,
           availableFrom: availableFrom,
@@ -871,7 +921,12 @@ class _StatusScreenState extends State<StatusScreen>
                     cityController: _cityController,
                     experienceYearsController: _experienceYearsController,
                     phoneController: _phoneController,
-                    youtubeChannelController: _youtubeChannelController,
+                  ),
+                  const SizedBox(height: 16),
+                  SocialLinksCard(
+                    facebookController: _facebookController,
+                    instagramController: _instagramController,
+                    tiktokController: _tiktokController,
                   ),
                   const SizedBox(height: 4),
                   Text(

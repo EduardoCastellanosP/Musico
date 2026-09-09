@@ -124,7 +124,7 @@ class _PhotoTile extends StatelessWidget {
 }
 
 /// Video tile whose "thumbnail" is the real first frame of the clip,
-/// instead of a generic placeholder icon or a YouTube-only thumbnail URL.
+/// instead of a generic placeholder icon.
 ///
 /// ponytail: this initializes a full [VideoPlayerController] per tile (and
 /// therefore starts buffering the actual video) just to paint frame zero —

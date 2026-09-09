@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../../core/constants/media_limits.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/video_thumbnail.dart';
 import '../../../models/musician_video.dart';
 import '../../in_app_video_player_screen.dart';
 
@@ -230,8 +229,7 @@ class _AddTile extends StatelessWidget {
 }
 
 /// Network image with a subtle spinner overlaid while it loads, instead of
-/// a flat black tile — shared by photo thumbnails and (legacy) YouTube
-/// video thumbnails.
+/// a flat black tile — shared by photo thumbnails and video thumbnails.
 class _LoadingNetworkImage extends StatelessWidget {
   const _LoadingNetworkImage({required this.url, required this.errorChild});
 
@@ -301,12 +299,9 @@ class _VideoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Only resolves for the handful of legacy YouTube links carried over
-    // from before videos became uploaded files (see schema.sql section 11)
-    // — newly-uploaded clips fall back to the generic placeholder, since
-    // generating a real thumbnail from an uploaded file is future work,
-    // not part of this pass.
-    final thumbnail = youtubeThumbnail(video.videoUrl);
+    // Falls back to the generic placeholder for videos uploaded before
+    // `musician_videos.thumbnail_url` existed.
+    final thumbnail = video.thumbnailUrl;
 
     return Stack(
       children: [

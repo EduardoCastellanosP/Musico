@@ -62,10 +62,10 @@ alter table public.profiles
 alter table public.profiles
   add column if not exists availability_note text not null default '';
 
-alter table public.profiles
-  add column if not exists youtube_channel text not null default '';
-
-comment on column public.profiles.youtube_channel is 'Canal de YouTube del músico (URL completa, @handle o channel_id) — alimenta la lectura automática de su feed RSS de videos.';
+-- YouTube fue retirado por completo de la app (ver sección 16 más abajo:
+-- ahora el video es 100% Supabase Storage y los perfiles enlazan sus
+-- redes sociales en su lugar).
+alter table public.profiles drop column if exists youtube_channel;
 
 -- Backfill único: copia los valores escalares existentes a los nuevos
 -- arreglos antes de retirar las columnas viejas `instrument`/`genre`. El
@@ -573,6 +573,12 @@ create index if not exists musician_videos_musician_id_created_at_idx
   on public.musician_videos (musician_id, created_at desc);
 
 comment on table public.musician_videos is 'Portafolio de video de cada músico, hasta 5 por músico (musician_videos_max_3), con conteo de vistas.';
+
+-- "Thumbnail first": una miniatura JPEG liviana que VideoFeedScreen puede
+-- mostrar de inmediato mientras decide si vale la pena empezar a
+-- descargar el video real (pesado) para esa página. Nullable porque los
+-- videos subidos antes de este cambio no tienen una.
+alter table public.musician_videos add column if not exists thumbnail_url text;
 
 -- Un CHECK no puede contar filas hermanas, así que el límite (a diferencia
 -- del de fotos, un simple `array_length <= 10`) se aplica con un trigger —
@@ -1130,3 +1136,20 @@ end;
 $$;
 
 grant execute on function public.accept_whatsapp_public_consent() to authenticated;
+
+-- =========================================================
+-- 16. Redes sociales (reemplaza YouTube)
+-- YouTube se retiró por completo del proyecto (ver la columna
+-- `youtube_channel` eliminada en la sección 1): el video ahora vive
+-- exclusivamente en el bucket `musician-videos` de Supabase Storage. En su
+-- lugar, un músico puede enlazar sus perfiles públicos de Facebook,
+-- Instagram y TikTok, mostrados como íconos condicionales en su tarjeta de
+-- perfil.
+-- =========================================================
+alter table public.profiles add column if not exists facebook_url text;
+alter table public.profiles add column if not exists instagram_url text;
+alter table public.profiles add column if not exists tiktok_url text;
+
+comment on column public.profiles.facebook_url is 'Enlace público al perfil/página de Facebook del músico. Null/vacío = no se muestra el ícono en ProfileHeader.';
+comment on column public.profiles.instagram_url is 'Enlace público al perfil de Instagram del músico. Null/vacío = no se muestra el ícono en ProfileHeader.';
+comment on column public.profiles.tiktok_url is 'Enlace público al perfil de TikTok del músico. Null/vacío = no se muestra el ícono en ProfileHeader.';
