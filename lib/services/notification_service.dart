@@ -271,7 +271,7 @@ Future<SupabaseClient> _ensureSupabaseClient() async {
   } catch (_) {
     await Supabase.initialize(
       url: const String.fromEnvironment('SUPABASE_URL'),
-      anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
+      publishableKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
     );
     return Supabase.instance.client;
   }

@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
 
 import 'dashboard_screen.dart';
+import 'my_services_screen.dart';
 import 'video_feed_screen.dart';
 
 /// Bottom-nav shell for the authenticated app: "Directorio" (the musician
-/// list, [DashboardScreen]) and "Videos" (the Reels-style feed,
-/// [VideoFeedScreen]). `IndexedStack` keeps both tabs mounted and their
-/// state alive across switches — DashboardScreen's loaded list/filters and
-/// VideoFeedScreen's current playback position both survive tapping back
-/// and forth, instead of rebuilding whichever tab isn't visible.
+/// list, [DashboardScreen]), "Mis Servicios" ([MyServicesScreen], the
+/// provider's own Tarima listings), and "Videos" (the Reels-style feed,
+/// [VideoFeedScreen]). `IndexedStack` keeps all three tabs mounted and
+/// their state alive across switches — DashboardScreen's loaded
+/// list/filters and VideoFeedScreen's current playback position both
+/// survive tapping back and forth, instead of rebuilding whichever tab
+/// isn't visible.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
 
@@ -17,7 +20,7 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
-  static const _videosTabIndex = 1;
+  static const _videosTabIndex = 2;
 
   int _index = 0;
 
@@ -41,12 +44,17 @@ class _HomeShellState extends State<HomeShell> {
           index: _index,
           children: [
             const DashboardScreen(),
+            const MyServicesScreen(),
             VideoFeedScreen(
               isActive: onVideosTab,
               onBack: () => _goToTab(0),
             ),
           ],
         ),
+        // No FAB of this shell's own here: "Mis Servicios" already has its
+        // own ("+" opens the same `create_service_modal.dart`), and a
+        // second one layered on top from this outer `Scaffold` would just
+        // duplicate it. Videos never wanted one either.
         // Hidden on the Videos tab so the feed renders truly full-screen
         // (TikTok/Reels-style) — VideoFeedScreen's own back arrow is what
         // brings the user (and this bar) back to Directorio.
@@ -82,6 +90,11 @@ class _HomeShellState extends State<HomeShell> {
                       icon: Icon(Icons.people_alt_outlined),
                       selectedIcon: Icon(Icons.people_alt_rounded),
                       label: 'Directorio',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(Icons.storefront_outlined),
+                      selectedIcon: Icon(Icons.storefront_rounded),
+                      label: 'Mis Servicios',
                     ),
                     NavigationDestination(
                       icon: Icon(Icons.video_collection_outlined),

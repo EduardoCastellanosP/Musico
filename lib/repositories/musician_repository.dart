@@ -151,6 +151,51 @@ class MusicianRepository {
     return profile?.hasCompleteProfile ?? false;
   }
 
+  /// Whether the logged-in user is a moderator — drives [AuthGate]'s
+  /// post-login redirect to [AdminDashboardScreen] instead of [HomeShell].
+  /// A single-column select rather than routing through [fetchCurrentProfile]
+  /// (which also joins `musician_videos`) since this only needs one boolean,
+  /// checked once per session right after login.
+  Future<bool> currentProfileIsAdmin() async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) return false;
+
+    final row = await _client
+        .from('profiles')
+        .select('is_admin')
+        .eq('id', uid)
+        .maybeSingle();
+    return row?['is_admin'] as bool? ?? false;
+  }
+
+  /// `'client'` / `'musician'` chosen in `RoleSelectionModal`, or `null`
+  /// before the user has ever picked one — that `null` is what makes
+  /// [AuthGate] show the modal in the first place. See
+  /// `supabase/schema.sql` §21.
+  Future<String?> currentProfileRole() async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) return null;
+
+    final row = await _client
+        .from('profiles')
+        .select('role')
+        .eq('id', uid)
+        .maybeSingle();
+    return row?['role'] as String?;
+  }
+
+  /// Persists the onboarding choice — a plain `.update()` is enough (no RPC
+  /// needed, unlike the KYC consent write) since this has no accompanying
+  /// audit row and `profiles_update_own` already allows it.
+  Future<void> updateCurrentProfileRole(String role) async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) {
+      throw StateError('No hay una sesión activa.');
+    }
+
+    await _client.from('profiles').update({'role': role}).eq('id', uid);
+  }
+
   /// Any musician's full profile by id — used by [VideoFeedScreen] to open
   /// [MusicianDetailScreen] when the viewer taps a video's profile row
   /// (that screen needs the full [Musician], not [VideoFeedItem]'s smaller
@@ -278,6 +323,31 @@ class MusicianRepository {
           'facebook_url': facebookUrl,
           'instagram_url': instagramUrl,
           'tiktok_url': tiktokUrl,
+        })
+        .eq('id', uid);
+  }
+
+  /// Lighter-weight sibling of [updateMusicianProfile] for a client's own
+  /// "Perfil" screen — just the 3 contact fields Mussy actually needs from
+  /// that side (see `isProfileCompleteForBooking`), instead of forcing a
+  /// client to submit musician-only fields (instruments, genres, coverage
+  /// cities...) they have no UI for. [phone] is expected already in
+  /// `+57XXXXXXXXXX` form (see `PhoneInputField.getCleanPhone`).
+  Future<void> updateClientContactInfo({
+    required String fullName,
+    required String phone,
+    required String? city,
+  }) async {
+    final uid = _requireUserId();
+    await _client
+        .from('profiles')
+        .update({
+          'full_name': fullName,
+          'phone': phone,
+          // `profiles.city` is `not null` — omitting the key (rather than
+          // sending an explicit `null`) is what lets a null [city] mean
+          // "leave it as-is" instead of a Postgres constraint violation.
+          'city': ?city,
         })
         .eq('id', uid);
   }
@@ -482,7 +552,7 @@ class MusicianRepository {
         .insert({
           'musician_id': uid,
           'video_url': videoUrl,
-          if (thumbnailUrl != null) 'thumbnail_url': thumbnailUrl,
+          'thumbnail_url': ?thumbnailUrl,
         })
         .select()
         .single();

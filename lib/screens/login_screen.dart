@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 import '../core/theme/app_theme.dart';
 import '../services/auth_service.dart';
 import 'widgets/google_sign_in_button.dart';
+import 'widgets/legal_modal.dart';
 
 /// Pre-auth landing screen: a looping, muted video background behind a
 /// glassmorphism Google Sign-In card. Deliberately theme-locked to dark
@@ -27,6 +28,9 @@ class _LoginScreenState extends State<LoginScreen> {
   static const _backgroundVideoAsset = 'assets/videos/videoluces.mp4';
 
   final AuthService _authService = AuthService();
+  final _passwordFormKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
   late final VideoPlayerController _videoController;
   bool _isLoading = false;
   bool _isVideoInitialized = false;
@@ -64,6 +68,8 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void dispose() {
     _videoController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
@@ -75,6 +81,24 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) _showMessage(e.message);
     } catch (_) {
       if (mounted) _showMessage('No pudimos iniciar sesión con Google.');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _handlePasswordSignIn() async {
+    if (!_passwordFormKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+    try {
+      await _authService.signInWithPassword(
+        _emailController.text.trim(),
+        _passwordController.text,
+      );
+    } on AuthException catch (e) {
+      if (mounted) _showMessage(e.message);
+    } catch (_) {
+      if (mounted) _showMessage('No pudimos iniciar sesión. Intenta de nuevo.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -152,6 +176,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       _LoginCard(
                         isLoading: _isLoading,
                         onGoogleSignIn: _handleGoogleSignIn,
+                        formKey: _passwordFormKey,
+                        emailController: _emailController,
+                        passwordController: _passwordController,
+                        onPasswordSignIn: _handlePasswordSignIn,
                       ),
                       const SizedBox(height: 32),
                       const _Footer(),
@@ -219,14 +247,58 @@ class _Hero extends StatelessWidget {
   }
 }
 
-/// Glassmorphism card: blurred translucent background + the Google
-/// Sign-In CTA. `ClipRRect` is required here — without it, `BackdropFilter`
-/// blurs a rectangle that ignores the `Container`'s own rounded corners.
-class _LoginCard extends StatelessWidget {
-  const _LoginCard({required this.isLoading, required this.onGoogleSignIn});
+/// Glassmorphism card: blurred translucent background, the email/password
+/// form, and the Google Sign-In CTA below it. `ClipRRect` is required here
+/// — without it, `BackdropFilter` blurs a rectangle that ignores the
+/// `Container`'s own rounded corners.
+class _LoginCard extends StatefulWidget {
+  const _LoginCard({
+    required this.isLoading,
+    required this.onGoogleSignIn,
+    required this.formKey,
+    required this.emailController,
+    required this.passwordController,
+    required this.onPasswordSignIn,
+  });
 
   final bool isLoading;
   final VoidCallback onGoogleSignIn;
+  final GlobalKey<FormState> formKey;
+  final TextEditingController emailController;
+  final TextEditingController passwordController;
+  final VoidCallback onPasswordSignIn;
+
+  @override
+  State<_LoginCard> createState() => _LoginCardState();
+}
+
+class _LoginCardState extends State<_LoginCard> {
+  static final _emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+
+  bool _obscurePassword = true;
+  bool _emailLooksValid = false;
+
+  InputDecoration _fieldDecoration(String hint, IconData icon) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
+      prefixIcon: Icon(icon, color: Colors.white.withValues(alpha: 0.6)),
+      filled: true,
+      fillColor: Colors.white.withValues(alpha: 0.06),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -251,9 +323,94 @@ class _LoginCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 20),
+              Form(
+                key: widget.formKey,
+                autovalidateMode: AutovalidateMode.onUserInteraction,
+                child: Column(
+                  children: [
+                    TextFormField(
+                      controller: widget.emailController,
+                      enabled: !widget.isLoading,
+                      keyboardType: TextInputType.emailAddress,
+                      autofillHints: const [AutofillHints.email],
+                      style: const TextStyle(color: Colors.white),
+                      onChanged: (value) => setState(
+                        () => _emailLooksValid = _emailRegex.hasMatch(value.trim()),
+                      ),
+                      decoration: _fieldDecoration('Correo', Icons.email_outlined).copyWith(
+                        suffixIcon: _emailLooksValid
+                            ? const Icon(Icons.check_circle, color: Colors.greenAccent)
+                            : null,
+                      ),
+                      validator: (value) {
+                        final email = value?.trim() ?? '';
+                        if (email.isEmpty) return 'Ingresa tu correo';
+                        if (!_emailRegex.hasMatch(email)) {
+                          return 'Correo inválido';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: widget.passwordController,
+                      enabled: !widget.isLoading,
+                      obscureText: _obscurePassword,
+                      autofillHints: const [AutofillHints.password],
+                      style: const TextStyle(color: Colors.white),
+                      decoration: _fieldDecoration('Contraseña', Icons.lock_outline).copyWith(
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                            color: Colors.white.withValues(alpha: 0.6),
+                          ),
+                          onPressed: () =>
+                              setState(() => _obscurePassword = !_obscurePassword),
+                        ),
+                      ),
+                      validator: (value) => (value == null || value.length < 6)
+                          ? 'Mínimo 6 caracteres'
+                          : null,
+                      onFieldSubmitted: (_) =>
+                          widget.isLoading ? null : widget.onPasswordSignIn(),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: widget.isLoading ? null : widget.onPasswordSignIn,
+                        child: widget.isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('Iniciar sesión'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(child: Divider(color: Colors.white.withValues(alpha: 0.15))),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: Text(
+                      'o',
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
+                    ),
+                  ),
+                  Expanded(child: Divider(color: Colors.white.withValues(alpha: 0.15))),
+                ],
+              ),
+              const SizedBox(height: 20),
               GoogleSignInButton(
-                isLoading: isLoading,
-                onPressed: onGoogleSignIn,
+                isLoading: widget.isLoading,
+                onPressed: widget.onGoogleSignIn,
               ),
             ],
           ),
@@ -267,76 +424,6 @@ class _LoginCard extends StatelessWidget {
 /// line. Now interactive with professional terms and privacy policy modals.
 class _Footer extends StatelessWidget {
   const _Footer();
-
-  void _showLegalModal(BuildContext context, String title, String content) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF121216),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (context, scrollController) => Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: SingleChildScrollView(
-                  controller: scrollController,
-                  child: Text(
-                    content,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.8),
-                      fontSize: 14,
-                      height: 1.5,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white.withValues(alpha: 0.1),
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Entendido'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -386,17 +473,10 @@ class _Footer extends StatelessWidget {
                   decoration: TextDecoration.underline,
                 ),
                 recognizer: TapGestureRecognizer()
-                  ..onTap = () => _showLegalModal(
+                  ..onTap = () => showLegalModal(
                         context,
-                        'Términos de Servicio',
-                        '1. OBJETO Y NATURALEZA DE LA PLATAFORMA\n\n'
-                            'Mussy opera exclusivamente como un directorio digital de intermediación y vitrina comercial. Su finalidad es conectar de manera directa a clientes o organizadores de eventos con prestadores independientes de servicios artísticos, musicales, de animación, DJs y logística de entretenimiento.\n\n'
-                            '2. LIMITACIÓN DE RESPONSABILIDAD\n\n'
-                            'Mussy no es parte de los contratos de prestación de servicios celebrados entre los usuarios y los artistas o proveedores. Por consiguiente, Mussy no asume ninguna responsabilidad por la calidad, cumplimiento, puntualidad, cancelaciones, pagos o disputas derivadas de las contrataciones acordadas de forma externa a través del contacto facilitado por el directorio.\n\n'
-                            '3. USO ADECUADO DE LOS DATOS DE CONTACTO\n\n'
-                            'Los números telefónicos y canales de contacto publicados en los perfiles tienen como único propósito propiciar acuerdos comerciales legítimos para eventos. Queda estrictamente prohibido el uso de esta información para fines de suplantación, hostigamiento, campañas masivas de spam o actividades contrarias a la ley colombiana.\n\n'
-                            '4. PROPIEDAD INTELECTUAL Y CONTENIDO\n\n'
-                            'Los proveedores y artistas garantizan que cuentan con los derechos de autor, autorizaciones e imágenes de perfil expuestas en sus galerías, liberando a Mussy de cualquier reclamación por infracción de derechos de terceros.',
+                        title: 'Términos de Servicio',
+                        content: kTermsOfServiceText,
                       ),
               ),
               const TextSpan(text: ' y la '),
@@ -408,20 +488,10 @@ class _Footer extends StatelessWidget {
                   decoration: TextDecoration.underline,
                 ),
                 recognizer: TapGestureRecognizer()
-                  ..onTap = () => _showLegalModal(
+                  ..onTap = () => showLegalModal(
                         context,
-                        'Política de Privacidad y Tratamiento de Datos',
-                        '1. RESPONSABLE DEL TRATAMIENTO DE DATOS\n\n'
-                            'En cumplimiento de la Ley estatutaria 1581 de 2012 y el Decreto reglamentario 1377 de 2013 de Colombia sobre protección de datos personales, informamos que los datos recopilados a través de nuestro sistema de autenticación (nombre, correo electrónico y datos opcionales de perfil o contacto) son tratados bajo rigurosos estándares de seguridad.\n\n'
-                            '2. FINALIDAD DE LA RECOLECCIÓN\n\n'
-                            'La información suministrada por los usuarios tiene como únicas finalidades:\n'
-                            '• Gestionar la creación y autenticación de cuentas de usuario mediante Google.\n'
-                            '• Facilitar la visualización del directorio de talento y servicios para eventos.\n'
-                            '• Permitir la comunicación directa entre interesados y artistas a través de canales habilitados (como enlaces de WhatsApp).\n\n'
-                            '3. NO CESIÓN A TERCEROS\n\n'
-                            'Sus datos personales no serán comercializados, cedidos, alquilados ni compartidos con terceros con fines publicitarios o comerciales ajenos a la operación interna de la plataforma.\n\n'
-                            '4. DERECHOS DEL TITULAR (HABEAS DATA)\n\n'
-                            'Como titular de los datos, usted tiene derecho a conocer, actualizar, rectificar y solicitar la supresión de sus datos personales en cualquier momento, comunicándose directamente con el soporte técnico de Mussy para proceder al retiro de su perfil y registros del sistema.',
+                        title: 'Política de Privacidad y Tratamiento de Datos',
+                        content: kPrivacyPolicyText,
                       ),
               ),
               const TextSpan(text: '.'),

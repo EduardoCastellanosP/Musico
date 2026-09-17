@@ -1153,3 +1153,447 @@ alter table public.profiles add column if not exists tiktok_url text;
 comment on column public.profiles.facebook_url is 'Enlace público al perfil/página de Facebook del músico. Null/vacío = no se muestra el ícono en ProfileHeader.';
 comment on column public.profiles.instagram_url is 'Enlace público al perfil de Instagram del músico. Null/vacío = no se muestra el ícono en ProfileHeader.';
 comment on column public.profiles.tiktok_url is 'Enlace público al perfil de TikTok del músico. Null/vacío = no se muestra el ícono en ProfileHeader.';
+
+-- =========================================================
+-- 19. Calificación de `provider_services`
+-- Mismo patrón (columna + default + CHECK) que `profiles.rating`/
+-- `reviews_count` — ClientHomeScreen's "★ 4.9 (87)" necesita un valor real
+-- de la base de datos, no un número inventado en el cliente. No hay todavía
+-- flujo de reseñas que las escriba; ambas quedan en su default hasta que
+-- exista uno, momento en el que se actualizarían vía RPC (mismo motivo que
+-- `profiles.rating` nunca se edita con un `update()` directo).
+-- =========================================================
+alter table public.provider_services
+  add column if not exists rating numeric(2, 1) not null default 5.0 check (rating >= 0 and rating <= 5);
+
+alter table public.provider_services
+  add column if not exists reviews_count integer not null default 0 check (reviews_count >= 0);
+
+-- =========================================================
+-- 17. `provider_services` — el "Puente" entre Backstage y Tarima
+-- Un músico ya tiene su perfil social en `profiles`; esta tabla es su
+-- perfil COMERCIAL por separado (una agrupación, un solista, sonido, DJ,
+-- ensayadero...), pensado para lo que ve un cliente final en la Tarima.
+-- Nace en `pending_review`: un admin lo aprueba antes de listarlo público.
+-- No hay tabla puente hacia `musician_videos` — se unen por `user_id` /
+-- `musician_id` (ambos apuntan a `profiles.id`), así el portafolio de
+-- video que el músico ya sube al Feed Comunitario aparece automáticamente
+-- en su perfil comercial sin duplicar filas ni sincronizar nada.
+-- =========================================================
+create table if not exists public.provider_services (
+  id              uuid primary key default gen_random_uuid(),
+  user_id         uuid not null references public.profiles (id) on delete cascade,
+  category        text not null check (category in ('Agrupación', 'Solista', 'DJ', 'Sonido', 'Ensayadero')),
+  business_name   text not null check (char_length(btrim(business_name)) > 0),
+  description     text not null default '',
+  price_per_hour  numeric(10, 2) check (price_per_hour is null or price_per_hour >= 0),
+  status          text not null default 'pending_review'
+                    check (status in ('pending_review', 'approved', 'rejected')),
+  cover_photos    text[] not null default '{}',
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+comment on table public.provider_services is 'Perfil de servicio comercial de un músico/agrupación, visible en la Tarima (marketplace) una vez aprobado. Su portafolio de video se lee por join contra `musician_videos.musician_id = provider_services.user_id`, no por FK propia.';
+
+-- Insignia de verificado, mostrada en la Tarima una vez el panel de
+-- moderación aprueba el servicio — ver sección 18. Separada de `status`
+-- porque un admin podría en teoría aprobar sin verificar (badge manual),
+-- aunque hoy `updateServiceStatus` siempre los pone en el mismo paso.
+alter table public.provider_services add column if not exists is_verified boolean not null default false;
+
+create index if not exists provider_services_user_id_idx on public.provider_services (user_id);
+create index if not exists provider_services_status_idx on public.provider_services (status);
+
+drop trigger if exists provider_services_set_updated_at on public.provider_services;
+create trigger provider_services_set_updated_at
+  before update on public.provider_services
+  for each row
+  execute function public.set_updated_at();
+
+alter table public.provider_services enable row level security;
+
+-- La Tarima es pública: cualquier autenticado puede ver servicios ya
+-- aprobados; el dueño además puede ver los suyos en cualquier estado
+-- (para revisar su propio `pending_review`/`rejected` en "Mis servicios").
+drop policy if exists "provider_services_select" on public.provider_services;
+create policy "provider_services_select"
+  on public.provider_services
+  for select
+  to authenticated
+  using (status = 'approved' or auth.uid() = user_id);
+
+drop policy if exists "provider_services_insert_own" on public.provider_services;
+create policy "provider_services_insert_own"
+  on public.provider_services
+  for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists "provider_services_update_own" on public.provider_services;
+create policy "provider_services_update_own"
+  on public.provider_services
+  for update
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "provider_services_delete_own" on public.provider_services;
+create policy "provider_services_delete_own"
+  on public.provider_services
+  for delete
+  to authenticated
+  using (auth.uid() = user_id);
+
+-- Vista de lectura para la Tarima: un servicio aprobado junto con el
+-- portafolio de video que su dueño ya subió al Feed Comunitario. El join es
+-- por `user_id = musician_id` — el mismo `profiles.id` en ambos mundos —,
+-- así que un video nuevo en `musician_videos` aparece aquí sin tocar esta
+-- vista ni `provider_services` para nada.
+-- Columnas listadas explícitamente (nunca `ps.*`): `create or replace view`
+-- solo permite AÑADIR columnas al final, nunca insertar una en medio — y
+-- `ps.*` desplaza automáticamente todo lo que venga después cada vez que
+-- `provider_services` gane una columna nueva por `alter table ... add
+-- column` (como `is_verified`, más arriba en esta misma sección), rompiendo el reemplazo con
+-- "cannot change name of view column". Enumerar columnas hace ese reemplazo
+-- estable para siempre, sin importar cuántas columnas se agreguen después.
+drop view if exists public.provider_service_portfolios;
+create view public.provider_service_portfolios as
+select
+  ps.id,
+  ps.user_id,
+  ps.category,
+  ps.business_name,
+  ps.description,
+  ps.price_per_hour,
+  ps.status,
+  ps.cover_photos,
+  ps.is_verified,
+  ps.created_at,
+  ps.updated_at,
+  coalesce(
+    array_agg(mv.video_url order by mv.created_at desc) filter (where mv.id is not null),
+    '{}'
+  ) as portfolio_video_urls
+from public.provider_services ps
+left join public.musician_videos mv on mv.musician_id = ps.user_id
+group by ps.id;
+
+-- Storage: bucket `service_covers`, mismo patrón que `musician-photos`/
+-- `musician-videos` (lectura pública, escritura restringida al propio
+-- dueño vía el prefijo de carpeta `{uid}/...`) — usado por
+-- `ProviderServiceRepository.uploadCoverPhotos` para las fotos de portada
+-- de `provider_services.cover_photos`.
+insert into storage.buckets (id, name, public)
+values ('service_covers', 'service_covers', true)
+on conflict (id) do update set public = excluded.public;
+
+drop policy if exists "service_covers_storage_select" on storage.objects;
+create policy "service_covers_storage_select"
+  on storage.objects
+  for select
+  to public
+  using (bucket_id = 'service_covers');
+
+drop policy if exists "service_covers_storage_insert" on storage.objects;
+create policy "service_covers_storage_insert"
+  on storage.objects
+  for insert
+  to authenticated
+  with check (
+    bucket_id = 'service_covers'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "service_covers_storage_delete" on storage.objects;
+create policy "service_covers_storage_delete"
+  on storage.objects
+  for delete
+  to authenticated
+  using (
+    bucket_id = 'service_covers'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- =========================================================
+-- 18. Panel de Moderación (Admin Dashboard)
+-- `profiles.is_admin` es el único rol de la app: sin fila propia en una
+-- tabla `admins` separada, un simple flag basta porque solo controla la
+-- moderación de `provider_services`. Las policies "_own" de la sección 17
+-- ya cubren al dueño del servicio; las de abajo son ADICIONALES (RLS
+-- combina políticas permisivas del mismo comando con OR), así que un admin
+-- ve/edita CUALQUIER fila sin quitarle nada a esas policies existentes.
+-- =========================================================
+alter table public.profiles add column if not exists is_admin boolean not null default false;
+
+comment on column public.profiles.is_admin is 'Flag manual (activado directamente en la base de datos) para el panel de moderación de provider_services. No hay UI en la app para otorgarlo.';
+
+drop policy if exists "provider_services_select_admin" on public.provider_services;
+create policy "provider_services_select_admin"
+  on public.provider_services
+  for select
+  to authenticated
+  using (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_admin)
+  );
+
+drop policy if exists "provider_services_update_admin" on public.provider_services;
+create policy "provider_services_update_admin"
+  on public.provider_services
+  for update
+  to authenticated
+  using (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_admin)
+  )
+  with check (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_admin)
+  );
+
+-- =========================================================
+-- 20. KYC / Habeas Data (Ley 1581 de 2012) para `provider_services`
+-- `identity_doc_url` guarda la RUTA privada del documento (nunca una URL
+-- pública: el bucket `identity_documents` es privado) — el admin la resuelve
+-- a una signed URL de corta duración vía
+-- `ProviderServiceRepository.getIdentityDocumentSignedUrl`, igual que
+-- cualquier objeto de un bucket sin lectura pública.
+--
+-- Ambas columnas quedan NULLABLE a propósito: son `alter table add column`
+-- sobre una tabla que ya puede tener filas de antes de que este flujo KYC
+-- existiera (no hay un valor por defecto razonable para "documento" o
+-- "fecha de consentimiento" de esas filas viejas), así que un NOT NULL aquí
+-- rompería la migración. Lo obligatorio pasa a nivel de aplicación:
+-- `CreateServiceModal` bloquea el envío del formulario sin foto de
+-- portada, sin documento subido y sin la casilla de Habeas Data marcada.
+-- =========================================================
+alter table public.provider_services add column if not exists identity_doc_url text;
+alter table public.provider_services add column if not exists habeas_data_accepted_at timestamptz;
+
+comment on column public.provider_services.identity_doc_url is 'Ruta privada (no URL pública) del documento de identidad en el bucket `identity_documents`. Solo el dueño y un admin pueden leerlo (RLS de storage.objects abajo).';
+comment on column public.provider_services.habeas_data_accepted_at is 'Momento en que el músico aceptó la autorización de tratamiento de datos (Ley 1581 de 2012) al crear ESTE servicio. Ver también el registro de auditoría inmutable en `user_consents` (sección 15), escrito atómicamente junto a esta columna por `create_provider_service_with_consent`.';
+
+-- Storage: bucket PRIVADO `identity_documents` — a diferencia de
+-- `service_covers`/`musician-photos`/`musician-videos` (todos públicos en
+-- lectura), este nunca expone `to public`. Solo el propio dueño (prefijo de
+-- carpeta `{uid}/...`, mismo patrón que los buckets públicos) y un admin
+-- (`profiles.is_admin`) pueden leer un objeto.
+insert into storage.buckets (id, name, public)
+values ('identity_documents', 'identity_documents', false)
+on conflict (id) do update set public = excluded.public;
+
+drop policy if exists "identity_documents_storage_select_own" on storage.objects;
+create policy "identity_documents_storage_select_own"
+  on storage.objects
+  for select
+  to authenticated
+  using (
+    bucket_id = 'identity_documents'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "identity_documents_storage_select_admin" on storage.objects;
+create policy "identity_documents_storage_select_admin"
+  on storage.objects
+  for select
+  to authenticated
+  using (
+    bucket_id = 'identity_documents'
+    and exists (select 1 from public.profiles p where p.id = auth.uid() and p.is_admin)
+  );
+
+drop policy if exists "identity_documents_storage_insert" on storage.objects;
+create policy "identity_documents_storage_insert"
+  on storage.objects
+  for insert
+  to authenticated
+  with check (
+    bucket_id = 'identity_documents'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists "identity_documents_storage_delete_own" on storage.objects;
+create policy "identity_documents_storage_delete_own"
+  on storage.objects
+  for delete
+  to authenticated
+  using (
+    bucket_id = 'identity_documents'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+-- Crea el servicio y su registro de auditoría de Habeas Data en una sola
+-- transacción — mismo motivo que `accept_whatsapp_public_consent` (sección
+-- 15): si cualquiera de los dos inserts falla, Postgres revierte ambos, así
+-- nunca queda un `provider_services.habeas_data_accepted_at` sin su prueba
+-- de consentimiento correspondiente en `user_consents`, ni viceversa.
+-- `security invoker` basta (a diferencia de esa función): ambos inserts ya
+-- están permitidos por las policies "insert_own" existentes de cada tabla
+-- para `auth.uid() = user_id`.
+create or replace function public.create_provider_service_with_consent(
+  category text,
+  business_name text,
+  description text,
+  price_per_hour numeric,
+  cover_photos text[],
+  identity_doc_url text
+)
+returns uuid
+language plpgsql
+security invoker
+as $$
+declare
+  me uuid := auth.uid();
+  new_id uuid;
+begin
+  if me is null then
+    raise exception 'No hay una sesión activa.';
+  end if;
+
+  insert into public.provider_services (
+    user_id, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, habeas_data_accepted_at
+  )
+  values (
+    me, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, now()
+  )
+  returning id into new_id;
+
+  insert into public.user_consents (user_id, consent_type, accepted_version)
+  values (me, 'identity_document_habeas_data', '1.0');
+
+  return new_id;
+end;
+$$;
+
+grant execute on function public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text
+) to authenticated;
+
+-- =========================================================
+-- 21. Rol de onboarding ("Soy Cliente" / "Soy Músico / Proveedor")
+-- Reemplaza el `selectedRole` session-only que vivía solo en memoria del
+-- cliente Flutter (se perdía en cada reinicio de la app, obligando a
+-- re-elegir cada vez): ahora es una columna real, así que
+-- `RoleSelectionModal` solo se muestra la primera vez (`role is null`) y
+-- todo login posterior lee este valor y redirige directo, sin preguntar de
+-- nuevo. No tiene relación con `is_admin` (sección 18): un admin salta
+-- tanto la elección de rol como su valor, siempre va a
+-- AdminDashboardScreen.
+-- =========================================================
+alter table public.profiles add column if not exists role text;
+
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role is null or role in ('client', 'musician'));
+
+comment on column public.profiles.role is 'Elegido una sola vez en RoleSelectionModal tras el primer login. Null = todavía no eligió (dispara el modal en AuthGate). No requiere policy nueva: profiles_update_own (sección 6) ya permite `auth.uid() = id` en UPDATE.';
+
+-- =========================================================
+-- 22. "Artistas Guardados" (favoritos) y "Mis Reservas" del cliente
+-- No existe una tabla `services` en este proyecto — el marketplace ya
+-- construido (sección 17) es `provider_services`, así que ambas FKs
+-- apuntan ahí en vez de a una tabla nueva paralela.
+-- =========================================================
+create table if not exists public.saved_services (
+  id          uuid primary key default gen_random_uuid(),
+  client_id   uuid not null references public.profiles (id) on delete cascade,
+  service_id  uuid not null references public.provider_services (id) on delete cascade,
+  created_at  timestamptz not null default now(),
+  constraint saved_services_unique unique (client_id, service_id)
+);
+
+comment on table public.saved_services is 'Favoritos de un cliente en la Tarima. `saved_services_unique` evita guardar el mismo servicio dos veces (mismo patrón que `video_likes`, sección 12).';
+
+create index if not exists saved_services_client_id_idx on public.saved_services (client_id, created_at desc);
+
+alter table public.saved_services enable row level security;
+
+drop policy if exists "saved_services_select_own" on public.saved_services;
+create policy "saved_services_select_own"
+  on public.saved_services
+  for select
+  to authenticated
+  using (auth.uid() = client_id);
+
+drop policy if exists "saved_services_insert_own" on public.saved_services;
+create policy "saved_services_insert_own"
+  on public.saved_services
+  for insert
+  to authenticated
+  with check (auth.uid() = client_id);
+
+drop policy if exists "saved_services_delete_own" on public.saved_services;
+create policy "saved_services_delete_own"
+  on public.saved_services
+  for delete
+  to authenticated
+  using (auth.uid() = client_id);
+
+-- =========================================================
+-- Reservas — nace en `pending_advance` (esperando que el cliente pague el
+-- adelanto); el flujo que la mueve a `confirmed`/`cancelled`/`completed`
+-- todavía no existe, así que por ahora solo hay policies de lectura e
+-- inserción para el cliente. Dejar listo pero sin construir de más:
+-- - Falta una policy de UPDATE para que el cliente cancele su propia
+--   reserva pendiente.
+-- - Falta una policy de SELECT para que el músico dueño del
+--   `provider_services` reservado vea las solicitudes contra su servicio.
+-- Ninguna de las dos se agrega todavía porque no hay UI que las use — se
+-- añaden en la vista de detalle mencionada en la tarea, junto con el RPC
+-- que de verdad mueva el estado tras el pago del adelanto.
+-- =========================================================
+create table if not exists public.bookings (
+  id          uuid primary key default gen_random_uuid(),
+  client_id   uuid not null references public.profiles (id) on delete cascade,
+  service_id  uuid not null references public.provider_services (id) on delete cascade,
+  event_date  timestamptz not null,
+  status      text not null default 'pending_advance'
+                check (status in ('pending_advance', 'confirmed', 'cancelled', 'completed')),
+  created_at  timestamptz not null default now()
+);
+
+comment on table public.bookings is 'Solicitudes de contratación de un cliente contra un provider_services. status arranca en pending_advance hasta que el flujo de pago (no construido aún) lo mueva.';
+
+create index if not exists bookings_client_id_idx on public.bookings (client_id, event_date desc);
+create index if not exists bookings_service_id_idx on public.bookings (service_id);
+
+alter table public.bookings enable row level security;
+
+drop policy if exists "bookings_select_own" on public.bookings;
+create policy "bookings_select_own"
+  on public.bookings
+  for select
+  to authenticated
+  using (auth.uid() = client_id);
+
+drop policy if exists "bookings_insert_own" on public.bookings;
+create policy "bookings_insert_own"
+  on public.bookings
+  for insert
+  to authenticated
+  with check (auth.uid() = client_id);
+
+-- =========================================================
+-- 23. Vertical "Ocio & Discotecas"
+-- Añade 'Discoteca' a las categorías válidas — en español y capitalizado
+-- para seguir la misma convención que el resto de la lista ('Agrupación',
+-- 'Solista', 'DJ', 'Sonido', 'Ensayadero'), no el `'nightclub'` en inglés
+-- de la tarea. El nombre de constraint (`provider_services_category_check`)
+-- es el que Postgres autogenera para un CHECK de una sola columna sin
+-- nombre explícito — el mismo que quedó fijado al crear la tabla en la
+-- sección 17 — así que hay que reemplazarlo por nombre, no solo añadir uno
+-- nuevo.
+-- =========================================================
+alter table public.provider_services drop constraint if exists provider_services_category_check;
+alter table public.provider_services add constraint provider_services_category_check
+  check (category in ('Agrupación', 'Solista', 'DJ', 'Sonido', 'Ensayadero', 'Discoteca'));
+
+-- Texto libre y corto para "lo que pasa hoy" en una discoteca (ej. "DJ
+-- invitado", "Noche de karaoke") — no existía ningún campo para esto.
+-- Nullable: filas ya existentes (y toda categoría que no sea 'Discoteca')
+-- simplemente no lo usan. `price_per_hour` (ya existente) se reutiliza como
+-- el valor del cover — sigue siendo "un precio", solo que `NightclubCard`
+-- lo rotula "Cover" en vez de "/h" para esta categoría.
+alter table public.provider_services add column if not exists todays_event text;
+
+comment on column public.provider_services.todays_event is 'Solo relevante para category = ''Discoteca'': breve texto del evento/programación de hoy, mostrado en NightclubCard. Null en cualquier otra categoría.';

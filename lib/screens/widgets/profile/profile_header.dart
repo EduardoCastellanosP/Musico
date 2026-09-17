@@ -291,7 +291,6 @@ class _ProfileInfo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final extension = theme.extension<AppThemeExtension>();
     // final roleSubtitle = musician.instruments.isNotEmpty
     //     ? musician.instrumentsSummary
     //     : musician.services.join(' · ');
@@ -450,31 +449,6 @@ class _SocialIconButton extends StatelessWidget {
           child: FaIcon(icon, size: 18, color: color),
         ),
       ),
-    );
-  }
-}
-
-class _RatingStars extends StatelessWidget {
-  const _RatingStars({required this.rating});
-
-  final double rating;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(5, (index) {
-        final threshold = index + 1;
-        IconData icon;
-        if (rating >= threshold) {
-          icon = Icons.star_rounded;
-        } else if (rating >= threshold - 0.5) {
-          icon = Icons.star_half_rounded;
-        } else {
-          icon = Icons.star_border_rounded;
-        }
-        return Icon(icon, size: 16, color: AppColors.accent);
-      }),
     );
   }
 }

@@ -53,6 +53,23 @@ class AuthService {
   }
 }
 
+  /// Inicia sesión con correo y contraseña. Lanza [AuthException] en
+  /// credenciales inválidas u otro rechazo de Supabase Auth — el caller
+  /// (`LoginScreen`) es quien traduce eso a un mensaje para el usuario.
+  /// No hace falta navegar tras un login exitoso: `AuthGate` ya reacciona a
+  /// [onAuthStateChange] igual que con Google.
+  Future<void> signInWithPassword(String email, String password) async {
+    try {
+      await _client.auth.signInWithPassword(email: email, password: password);
+    } on AuthException catch (e, stack) {
+      debugPrint(
+        'SUPABASE PASSWORD LOGIN ERROR: message="${e.message}" code=${e.code}',
+      );
+      debugPrint('$stack');
+      rethrow;
+    }
+  }
+
   /// Retorna la sesión activa actual almacenada de forma segura en el dispositivo.
   Session? get currentSession => _client.auth.currentSession;
 
