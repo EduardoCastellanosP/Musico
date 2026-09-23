@@ -20,6 +20,7 @@ class ProviderServiceManagementCard extends StatelessWidget {
     this.busy = false,
     this.onEdit,
     this.onDelete,
+    this.onAvailability,
   });
 
   final ProviderService service;
@@ -32,13 +33,47 @@ class ProviderServiceManagementCard extends StatelessWidget {
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
 
+  /// Opens the full-screen availability calendar for this service. Only
+  /// rendered when the service is `approved` — a listing still in review
+  /// or rejected has no bookings to protect yet.
+  final VoidCallback? onAvailability;
+
   @override
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(color: _kSurface, borderRadius: BorderRadius.circular(16)),
-      child: Row(
+      child: Column(
+        children: [
+          _buildRow(),
+          if (service.status == 'approved' && onAvailability != null) ...[
+            const SizedBox(height: 10),
+            _buildAvailabilityButton(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAvailabilityButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: onAvailability,
+        icon: const Icon(Icons.calendar_month, size: 18, color: _kAccent),
+        label: const Text('Disponibilidad', style: TextStyle(color: _kAccent, fontWeight: FontWeight.w600)),
+        style: OutlinedButton.styleFrom(
+          side: const BorderSide(color: _kAccent, width: 1.2),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRow() {
+    return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           ClipRRect(
@@ -72,7 +107,7 @@ class ProviderServiceManagementCard extends StatelessWidget {
                     if (service.pricePerHour != null) ...[
                       const SizedBox(width: 8),
                       Text(
-                        formatCopPerHour(service.pricePerHour!),
+                        formatCopPriceForPricingType(service.pricePerHour!, service.pricingType),
                         style: const TextStyle(color: _kAccent, fontSize: 12, fontWeight: FontWeight.w600),
                       ),
                     ],
@@ -126,8 +161,7 @@ class ProviderServiceManagementCard extends StatelessWidget {
                 ),
               ],
             ),
-        ],
-      ),
+      ],
     );
   }
 }
@@ -147,7 +181,7 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (status) {
-      'approved' when isVerified => ('Verificado', _kAccent),
+      'approved' when isVerified => ('Verificado', Colors.greenAccent),
       'approved' => ('Aprobado', Colors.greenAccent),
       'rejected' => ('Rechazado', Colors.redAccent),
       _ => ('En revisión', _kAccent),

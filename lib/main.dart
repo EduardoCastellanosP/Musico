@@ -9,9 +9,18 @@ import 'services/notification_service.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+  assert(
+    supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty,
+    'SUPABASE_URL/SUPABASE_ANON_KEY vacíos: falta pasar '
+    '--dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=... '
+    'al ejecutar (ver .vscode/launch.json.example).',
+  );
+
   await Supabase.initialize(
-    url: const String.fromEnvironment('SUPABASE_URL'),
-    publishableKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
+    url: supabaseUrl,
+    publishableKey: supabaseAnonKey,
     authOptions: FlutterAuthClientOptions(
       localStorage: SecureLocalStorage(),
     ),

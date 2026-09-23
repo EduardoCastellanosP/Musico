@@ -17,7 +17,7 @@ const String _videosBucket = 'musician-videos';
 /// alongside every `profiles` row — shared by [fetchMusicians] and
 /// [fetchCurrentProfile] so the two selects can't drift out of sync.
 const String _videoColumns =
-    'id, musician_id, video_url, thumbnail_url, views_count, created_at';
+    'id, musician_id, video_url, thumbnail_url, views_count, created_at, show_in_profile, service_id';
 
 /// `profiles` columns the Reels-style feed needs for its overlay/contact
 /// buttons — a small subset of what [Musician.fromJson] parses, since the
@@ -517,6 +517,7 @@ class MusicianRepository {
     required Uint8List bytes,
     required String fileExt,
     Uint8List? thumbnailBytes,
+    String? serviceId,
   }) async {
     final uid = _requireUserId();
     final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
@@ -553,6 +554,7 @@ class MusicianRepository {
           'musician_id': uid,
           'video_url': videoUrl,
           'thumbnail_url': ?thumbnailUrl,
+          'service_id': serviceId,
         })
         .select()
         .single();
@@ -584,6 +586,52 @@ class MusicianRepository {
   /// interrupting playback for.
   Future<void> incrementVideoView(String videoId) {
     return _client.rpc('increment_video_view', params: {'video_id': videoId});
+  }
+
+  /// Flips whether [videoId] shows up in the client-facing "Portafolio"
+  /// tab — `musician_videos_update_own` (§30) restricts this to the
+  /// video's own `musician_id`, and a column-level grant restricts the
+  /// write to `show_in_profile` itself, so this can never touch
+  /// `views_count` even though both live on the same row.
+  Future<void> setVideoVisibility(String videoId, bool showInProfile) {
+    return _client
+        .from('musician_videos')
+        .update({'show_in_profile': showInProfile})
+        .eq('id', videoId);
+  }
+
+  /// Reassigns [videoId] to [serviceId] — `null` means "todos mis
+  /// servicios" (§31's default). Same column-grant protection as
+  /// [setVideoVisibility]: the RLS policy allows updating the row, the
+  /// grant restricts it to just this column.
+  Future<void> setVideoService(String videoId, String? serviceId) {
+    return _client
+        .from('musician_videos')
+        .update({'service_id': serviceId})
+        .eq('id', videoId);
+  }
+
+  /// The subset of a musician's videos actually shown to a client browsing
+  /// one specific service — `ServiceDetailScreen`'s "Portafolio" tab.
+  /// Includes videos scoped to [serviceId] AND ones with no service
+  /// assigned yet (`service_id is null`, shown in every one of this
+  /// provider's services until they categorize it — see §31). Unlike
+  /// [fetchMusicians]/[fetchCurrentProfile] (which embed every video via
+  /// `musician_videos_select_authenticated`), this filters server-side by
+  /// `show_in_profile`/`service_id` so a hidden or out-of-scope video is
+  /// never even downloaded to the client, not just hidden in the UI.
+  Future<List<MusicianVideo>> fetchFeaturedVideos({
+    required String musicianId,
+    required String serviceId,
+  }) async {
+    final rows = await _client
+        .from('musician_videos')
+        .select(_videoColumns)
+        .eq('musician_id', musicianId)
+        .eq('show_in_profile', true)
+        .or('service_id.is.null,service_id.eq.$serviceId')
+        .order('created_at', ascending: false);
+    return rows.map(MusicianVideo.fromJson).toList();
   }
 
   /// Uploads [bytes] to the `avatars` bucket under a filename unique to the

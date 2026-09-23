@@ -786,6 +786,7 @@ class _ChatInputBar extends StatelessWidget {
                     controller: controller,
                     minLines: 1,
                     maxLines: 5,
+                    textCapitalization: TextCapitalization.sentences,
                     textInputAction: TextInputAction.newline,
                     style: const TextStyle(color: Colors.white, fontSize: 16),
                     cursorColor: _ChatPalette.sentBubbleStart,

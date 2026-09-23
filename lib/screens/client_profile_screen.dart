@@ -44,6 +44,7 @@ class _ClientProfileScreenState extends State<ClientProfileScreen> {
   String? _loadError;
   bool _uploadingAvatar = false;
   bool _saving = false;
+  bool _deletingAccount = false;
 
   // Flips true for a couple seconds right after a successful save, so the
   // button can show a check instead of its label — the "animación de
@@ -219,6 +220,59 @@ class _ClientProfileScreenState extends State<ClientProfileScreen> {
     }
   }
 
+  /// "Eliminar mi cuenta": same irreversible-deletion flow as a musician's
+  /// own profile (`StatusScreen._confirmDeleteAccount`) — confirms via
+  /// [AlertDialog], then wipes Storage files and the `auth.users` row via
+  /// [MusicianRepository.deleteAccount], and pops back to `AuthGate`'s
+  /// route so it can react to the cleared session.
+  Future<void> _confirmDeleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: _kSurface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('¿Eliminar tu cuenta?', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Esta acción es irreversible: se borrarán tu perfil, tus reservas '
+          'y tu historial de forma permanente.',
+          style: TextStyle(color: _kTextSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar', style: TextStyle(color: _kTextSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text(
+              'Eliminar',
+              style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _deletingAccount = true);
+    try {
+      await _repository.deleteAccount();
+      try {
+        await _authService.signOut();
+      } catch (_) {
+        // The account is already gone server-side either way; a failed
+        // remote sign-out call doesn't stop the local session from having
+        // been cleared, which is what AuthGate reacts to.
+      }
+      if (!mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _deletingAccount = false);
+      _showMessage('No pudimos eliminar tu cuenta: $e');
+    }
+  }
+
   void _showLegalOptions() {
     showModalBottomSheet<void>(
       context: context,
@@ -313,6 +367,7 @@ class _ClientProfileScreenState extends State<ClientProfileScreen> {
           nameField: TextFormField(
             controller: _nameController,
             textAlign: TextAlign.center,
+            textCapitalization: TextCapitalization.words,
             style: const TextStyle(
               color: Colors.white,
               fontSize: 20,
@@ -475,6 +530,28 @@ class _ClientProfileScreenState extends State<ClientProfileScreen> {
             ),
             icon: const Icon(Icons.logout_rounded),
             label: const Text('Cerrar sesión', style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: TextButton.icon(
+            onPressed: _deletingAccount ? null : _confirmDeleteAccount,
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.redAccent.withValues(alpha: 0.7),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            icon: _deletingAccount
+                ? const SizedBox(
+                    height: 16,
+                    width: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.delete_outline_rounded, size: 18),
+            label: const Text(
+              'Eliminar mi cuenta',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+            ),
           ),
         ),
       ],

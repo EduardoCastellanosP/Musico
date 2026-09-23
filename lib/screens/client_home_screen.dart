@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../core/utils/currency.dart';
+import '../models/musician.dart';
 import '../models/provider_service.dart';
 import '../repositories/client_repository.dart';
+import '../repositories/musician_repository.dart';
 import '../repositories/provider_service_repository.dart';
 import 'client_profile_screen.dart';
 import 'my_bookings_screen.dart';
@@ -69,11 +70,16 @@ class ClientHomeScreen extends StatefulWidget {
   State<ClientHomeScreen> createState() => _ClientHomeScreenState();
 }
 
-typedef _HomeData = ({List<ProviderService> services, Set<String> savedIds});
+typedef _HomeData = ({
+  List<ProviderService> services,
+  Set<String> savedIds,
+  Musician? profile,
+});
 
 class _ClientHomeScreenState extends State<ClientHomeScreen> {
   final _repository = ProviderServiceRepository();
   final _clientRepository = ClientRepository();
+  final _musicianRepository = MusicianRepository();
   late Future<_HomeData> _dataFuture;
   String _selectedFilter = _kFilters.first;
   String _selectedCity = _kDefaultCity;
@@ -91,13 +97,15 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
 
   Future<_HomeData> _load() async {
     final uid = Supabase.instance.client.auth.currentUser?.id;
-    final results = await Future.wait([
-      _repository.fetchApprovedServices(),
-      uid == null ? Future.value(<ProviderService>[]) : _clientRepository.fetchSavedServices(uid),
-    ]);
-    final services = results[0];
-    final savedIds = results[1].map((s) => s.id).toSet();
-    return (services: services, savedIds: savedIds);
+    final servicesFuture = _repository.fetchApprovedServices();
+    final savedFuture = uid == null
+        ? Future.value(<ProviderService>[])
+        : _clientRepository.fetchSavedServices(uid);
+    final profileFuture = _musicianRepository.fetchCurrentProfile();
+    final services = await servicesFuture;
+    final saved = await savedFuture;
+    final profile = await profileFuture;
+    return (services: services, savedIds: saved.map((s) => s.id).toSet(), profile: profile);
   }
 
   void _retry() {
@@ -143,6 +151,12 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
     final categories = _kFilterCategories[_selectedFilter];
     if (categories == null) return services;
     return services.where((s) => categories.contains(s.category)).toList();
+  }
+
+  void _openProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const ClientProfileScreen()),
+    );
   }
 
   void _openDetail(ProviderService service) {
@@ -206,7 +220,13 @@ class _ClientHomeScreenState extends State<ClientHomeScreen> {
             return CustomScrollView(
               slivers: [
                 SliverToBoxAdapter(
-                  child: _Header(city: _selectedCity, onTapLocation: _pickCity),
+                  child: _Header(
+                    city: _selectedCity,
+                    onTapLocation: _pickCity,
+                    avatarUrl: data.profile?.avatarUrl,
+                    initials: data.profile?.initials ?? '?',
+                    onTapAvatar: _openProfile,
+                  ),
                 ),
                 const SliverToBoxAdapter(child: AnimatedSearchField()),
                 SliverToBoxAdapter(
@@ -314,10 +334,19 @@ class _EmptyState extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.city, required this.onTapLocation});
+  const _Header({
+    required this.city,
+    required this.onTapLocation,
+    required this.avatarUrl,
+    required this.initials,
+    required this.onTapAvatar,
+  });
 
   final String city;
   final VoidCallback onTapLocation;
+  final String? avatarUrl;
+  final String initials;
+  final VoidCallback onTapAvatar;
 
   @override
   Widget build(BuildContext context) {
@@ -373,16 +402,31 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
-          Container(
-            padding: const EdgeInsets.all(2),
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.fromBorderSide(BorderSide(color: _kAccent, width: 2)),
-            ),
-            child: const CircleAvatar(
-              radius: 18,
-              backgroundColor: _kSurface,
-              child: Icon(Icons.person, color: _kTextSecondary),
+          GestureDetector(
+            onTap: onTapAvatar,
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.fromBorderSide(BorderSide(color: _kAccent, width: 2)),
+              ),
+              child: CircleAvatar(
+                radius: 18,
+                backgroundColor: const Color(0xFFFFB703),
+                backgroundImage: (avatarUrl != null && avatarUrl!.isNotEmpty)
+                    ? NetworkImage(avatarUrl!)
+                    : null,
+                child: (avatarUrl == null || avatarUrl!.isEmpty)
+                    ? Text(
+                        initials,
+                        style: const TextStyle(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                      )
+                    : null,
+              ),
             ),
           ),
         ],
@@ -548,9 +592,9 @@ class _FeaturedCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   ServiceRatingRow(rating: service.rating, reviewsCount: service.reviewsCount),
                   const SizedBox(height: 6),
-                  if (service.pricePerHour != null)
+                  if (service.clientPriceLabel != null)
                     Text(
-                      formatCopPrice(service.pricePerHour!),
+                      service.clientPriceLabel!,
                       style: const TextStyle(
                         color: _kAccent,
                         fontSize: 13,

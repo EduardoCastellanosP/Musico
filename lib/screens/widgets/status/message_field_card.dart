@@ -45,6 +45,7 @@ class MessageFieldCard extends StatelessWidget {
             controller: controller,
             maxLength: kStatusMessageMaxLength,
             maxLines: 3,
+            textCapitalization: TextCapitalization.sentences,
             style: theme.textTheme.bodyLarge,
             decoration: const InputDecoration(
               hintText: 'Ej: Disponible para parrandas y eventos privados',

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../../core/utils/currency.dart';
 import '../../../models/provider_service.dart';
 import '../services/service_cover_image.dart';
 import '../services/service_list_card.dart';
@@ -146,9 +145,9 @@ class _NightclubCardState extends State<NightclubCard> with SingleTickerProvider
                                 style: const TextStyle(color: Colors.white, fontSize: 13),
                               ),
                             ),
-                            if (service.pricePerHour != null)
+                            if (service.clientPriceLabel != null)
                               Text(
-                                'Cover: ${formatCopPrice(service.pricePerHour!)}',
+                                'Cover: ${service.clientPriceLabel}',
                                 style: const TextStyle(
                                   color: _kAccent,
                                   fontSize: 13,

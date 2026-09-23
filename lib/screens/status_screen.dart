@@ -1,7 +1,7 @@
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_compress/video_compress.dart';
@@ -12,7 +12,9 @@ import '../core/video/video_optimizer.dart';
 import '../models/musician.dart';
 import '../models/musician_stats.dart';
 import '../models/musician_video.dart';
+import '../models/provider_service.dart';
 import '../repositories/musician_repository.dart';
+import '../repositories/provider_service_repository.dart';
 import '../services/auth_service.dart';
 // ponytail: NotificationService desconectado para v1, ver _save().
 // import '../services/notification_service.dart';
@@ -31,6 +33,7 @@ import 'widgets/status/social_links_card.dart';
 import 'widgets/status/stats_panel.dart';
 import 'widgets/status/status_switch_card.dart';
 import 'widgets/status/whatsapp_visibility_card.dart';
+import 'widgets/blocking_progress_dialog.dart';
 import 'auth_gate.dart';
 import 'video_trimmer_screen.dart';
 
@@ -47,6 +50,7 @@ class StatusScreen extends StatefulWidget {
 class _StatusScreenState extends State<StatusScreen>
     with WidgetsBindingObserver {
   final MusicianRepository _repository = MusicianRepository();
+  final ProviderServiceRepository _providerServiceRepository = ProviderServiceRepository();
   final AuthService _authService = AuthService();
   final ImagePicker _imagePicker = ImagePicker();
   final TextEditingController _messageController = TextEditingController();
@@ -67,6 +71,7 @@ class _StatusScreenState extends State<StatusScreen>
   MusicianStats _stats = MusicianStats.zero;
   List<String> _photos = [];
   List<MusicianVideo> _videos = [];
+  List<ProviderService> _providerServices = [];
   List<String> _coverageCities = [];
   TimeOfDay _availableFrom = const TimeOfDay(hour: 8, minute: 0);
   TimeOfDay _availableTo = const TimeOfDay(hour: 22, minute: 0);
@@ -159,11 +164,13 @@ class _StatusScreenState extends State<StatusScreen>
     }
 
     final stats = await _repository.fetchContactStats(profile.id);
+    final providerServices = await _providerServiceRepository.fetchMyServices();
 
     if (!mounted) return;
     setState(() {
       _profile = profile;
       _stats = stats;
+      _providerServices = providerServices;
       _photos = List<String>.from(profile.photos);
       _videos = List<MusicianVideo>.from(profile.videos);
       _isFree = profile.isFree;
@@ -467,6 +474,14 @@ class _StatusScreenState extends State<StatusScreen>
     );
     if (picked == null) return;
 
+    // Asked before any trimming/compression work so a cancel here doesn't
+    // waste it. `null` means the provider backed out of the picker
+    // entirely (only reachable with 2+ services) — abort the whole
+    // upload rather than silently falling back to "todos mis servicios".
+    final serviceChoice = await _pickVideoService(allowUnassigned: false);
+    if (serviceChoice == null) return;
+    final serviceId = serviceChoice.isEmpty ? null : serviceChoice;
+
     File videoFile = File(picked.path);
     final maxSeconds = MediaLimits.maxVideoDuration.inSeconds;
     try {
@@ -488,11 +503,31 @@ class _StatusScreenState extends State<StatusScreen>
     }
 
     setState(() => _uploadingVideo = true);
-    _showMessage('Comprimiendo video, esto puede tardar un momento...');
+
+    // One continuous blocking modal instead of a plain SnackBar — covers
+    // both compression (determinate, real % from `VideoOptimizer`) and
+    // the upload that follows (indeterminate, no progress source for
+    // that step) by just updating its text, so the provider never sees
+    // it flicker closed and reopen between the two phases.
+    const initialLabel = 'Comprimiendo video...';
+    const subtitle = 'Esto puede tardar un momento.';
+    final progressState = ValueNotifier<BlockingProgressState>(
+      const BlockingProgressState(title: initialLabel, subtitle: subtitle),
+    );
+    VoidCallback? closeDialog;
+    if (mounted) {
+      closeDialog = showBlockingProgressDialog(context, state: progressState);
+    }
+
     try {
       // Egress control: 720p, no exception — see [VideoOptimizer].
       final compressedFile = await VideoOptimizer.compressForUpload(
         videoFile.path,
+        onProgress: (value) => progressState.value = BlockingProgressState(
+          title: initialLabel,
+          subtitle: subtitle,
+          percent: value,
+        ),
       );
 
       // "Thumbnail first" for the feed — best-effort: a failed thumbnail
@@ -507,7 +542,10 @@ class _StatusScreenState extends State<StatusScreen>
         thumbnailBytes = null;
       }
 
-      _showMessage('Subiendo video...');
+      progressState.value = const BlockingProgressState(
+        title: 'Subiendo video...',
+        subtitle: subtitle,
+      );
       final bytes = await compressedFile.readAsBytes();
       final fileExt = videoFile.path.contains('.')
           ? videoFile.path.split('.').last
@@ -516,16 +554,102 @@ class _StatusScreenState extends State<StatusScreen>
         bytes: bytes,
         fileExt: fileExt.toLowerCase(),
         thumbnailBytes: thumbnailBytes,
+        serviceId: serviceId,
       );
+      if (mounted) closeDialog?.call();
       if (!mounted) return;
       setState(() => _videos = [..._videos, video]);
       _showMessage('Video agregado correctamente');
     } catch (error) {
+      if (mounted) closeDialog?.call();
       if (!mounted) return;
       _showMessage('No pudimos agregar el video: $error');
     } finally {
+      progressState.dispose();
       await VideoCompress.deleteAllCache();
       if (mounted) setState(() => _uploadingVideo = false);
+    }
+  }
+
+  /// Asks the provider which of their `provider_services` a video belongs
+  /// to — needed because a single provider can have several service
+  /// listings (e.g. "Solista" and "Sonido"), and a video meant for one
+  /// shouldn't leak into another's public portfolio (see
+  /// `supabase/schema.sql` §31). Returns:
+  /// - `null` if the provider backed out of the picker (only reachable
+  ///   when [allowUnassigned] is true, or there are 2+ services);
+  /// - `''` for "todos mis servicios" (unassigned);
+  /// - a `provider_services.id` otherwise.
+  ///
+  /// Skips the dialog entirely when there's nothing to choose from: 0
+  /// services → `''`, exactly 1 service and [allowUnassigned] is false
+  /// (the upload flow, which always wants a real pick when one exists)
+  /// → that one service's id.
+  /// [initialSelection] highlights the video's current assignment when
+  /// reassigning (`''` for "todos mis servicios", a real id otherwise) —
+  /// left `null` for a new upload, where nothing should be preselected
+  /// until the provider actually taps an option.
+  Future<String?> _pickVideoService({
+    required bool allowUnassigned,
+    String? initialSelection,
+  }) async {
+    final services = _providerServices;
+    if (services.isEmpty) return '';
+    if (services.length == 1 && !allowUnassigned) return services.first.id;
+
+    final options = <_ServiceOption>[
+      if (allowUnassigned)
+        const _ServiceOption(
+          value: '',
+          icon: Icons.public,
+          title: 'Todos mis servicios',
+          subtitle: 'Se muestra en el portafolio de todos',
+        ),
+      for (final service in services)
+        _ServiceOption(
+          value: service.id,
+          icon: Icons.storefront_outlined,
+          title: service.businessName,
+          subtitle: service.category,
+        ),
+    ];
+
+    return showDialog<String>(
+      context: context,
+      builder: (_) => _ServiceOptionPickerDialog(
+        options: options,
+        initialValue: initialSelection,
+      ),
+    );
+  }
+
+  /// Lets the provider re-categorize a video any time after uploading —
+  /// same optimistic-update-with-revert shape as [_toggleVideoVisibility].
+  Future<void> _reassignVideoService(MusicianVideo video) async {
+    final choice = await _pickVideoService(
+      allowUnassigned: true,
+      initialSelection: video.serviceId ?? '',
+    );
+    if (choice == null) return;
+    final newServiceId = choice.isEmpty ? null : choice;
+    if (newServiceId == video.serviceId) return;
+
+    final previousServiceId = video.serviceId;
+    setState(() {
+      _videos = _videos
+          .map((v) => v.id == video.id ? v.copyWithServiceId(newServiceId) : v)
+          .toList();
+    });
+    try {
+      await _repository.setVideoService(video.id, newServiceId);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _videos = _videos
+            .map((v) => v.id == video.id ? v.copyWithServiceId(previousServiceId) : v)
+            .toList();
+      });
+      _showMessage('No pudimos actualizar el servicio del video. Intenta de nuevo.');
     }
   }
 
@@ -556,6 +680,29 @@ class _StatusScreenState extends State<StatusScreen>
     } catch (_) {
       if (!mounted) return;
       _showMessage('No pudimos eliminar el video. Intenta de nuevo.');
+    }
+  }
+
+  /// Flips the local state immediately (the badge updates the instant it's
+  /// tapped), then persists via [MusicianRepository.setVideoVisibility];
+  /// reverts on failure so the switch never lies about what's actually
+  /// saved.
+  Future<void> _toggleVideoVisibility(MusicianVideo video, bool showInProfile) async {
+    setState(() {
+      _videos = _videos
+          .map((v) => v.id == video.id ? v.copyWith(showInProfile: showInProfile) : v)
+          .toList();
+    });
+    try {
+      await _repository.setVideoVisibility(video.id, showInProfile);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _videos = _videos
+            .map((v) => v.id == video.id ? v.copyWith(showInProfile: !showInProfile) : v)
+            .toList();
+      });
+      _showMessage('No pudimos actualizar la visibilidad del video. Intenta de nuevo.');
     }
   }
 
@@ -991,12 +1138,15 @@ class _StatusScreenState extends State<StatusScreen>
                   MediaManagerCard(
                     photos: _photos,
                     videos: _videos,
+                    providerServices: _providerServices,
                     uploadingPhoto: _uploadingPhoto,
                     uploadingVideo: _uploadingVideo,
                     onAddPhoto: _addPhoto,
                     onRemovePhoto: _removePhoto,
                     onAddVideo: _addVideo,
                     onRemoveVideo: _removeVideo,
+                    onToggleVideoVisibility: _toggleVideoVisibility,
+                    onReassignVideoService: _reassignVideoService,
                   ),
                   const SizedBox(height: 28),
                   Text(
@@ -1227,3 +1377,180 @@ class _SavedSuccessDialog extends StatelessWidget {
     );
   }
 }
+
+/// One selectable row's data for [_ServiceOptionPickerDialog] — `value`
+/// uses the same `''` = "todos mis servicios" encoding
+/// [_StatusScreenState._pickVideoService] already returns.
+class _ServiceOption {
+  const _ServiceOption({
+    required this.value,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final String value;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+}
+
+/// "¿A qué servicio pertenece este video?" — same dark/gold modal shell
+/// as the delete-confirmation dialog (`my_services_screen.dart`) and the
+/// create/edit service modals, so this doesn't stick out as the one
+/// plain `AlertDialog` in the app. Tapping a row only highlights it;
+/// "Confirmar" is the separate step that actually closes the dialog with
+/// that choice, so the provider can see what they picked before
+/// committing.
+class _ServiceOptionPickerDialog extends StatefulWidget {
+  const _ServiceOptionPickerDialog({required this.options, this.initialValue});
+
+  final List<_ServiceOption> options;
+
+  /// Highlighted on first build — the video's current assignment when
+  /// reassigning, or `null` (nothing preselected) for a brand-new upload.
+  final String? initialValue;
+
+  @override
+  State<_ServiceOptionPickerDialog> createState() => _ServiceOptionPickerDialogState();
+}
+
+class _ServiceOptionPickerDialogState extends State<_ServiceOptionPickerDialog> {
+  late String? _selected = widget.initialValue;
+
+  static const _kBackground = Color(0xFF0D0D12);
+  static const _kAccent = Color(0xFFFFB703);
+  static const _kTextSecondary = Color(0xFF9A9AA5);
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 420),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+        decoration: BoxDecoration(
+          color: _kBackground,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _kAccent.withValues(alpha: 0.25)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '¿A qué servicio pertenece este video?',
+              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 16),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 320),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    for (final option in widget.options)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _SelectableServiceRow(
+                          option: option,
+                          selected: option.value == _selected,
+                          onTap: () => setState(() => _selected = option.value),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Cancelar', style: TextStyle(color: _kTextSecondary)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _selected == null ? null : () => Navigator.of(context).pop(_selected),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _kAccent,
+                      foregroundColor: Colors.black,
+                      disabledBackgroundColor: _kAccent.withValues(alpha: 0.3),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Confirmar', style: TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SelectableServiceRow extends StatelessWidget {
+  const _SelectableServiceRow({
+    required this.option,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _ServiceOption option;
+  final bool selected;
+  final VoidCallback onTap;
+
+  static const _kAccent = Color(0xFFFFB703);
+  static const _kSurface = Color(0xFF17171D);
+  static const _kTextSecondary = Color(0xFF9A9AA5);
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _kSurface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: selected ? _kAccent : Colors.transparent, width: 1.5),
+          ),
+          child: Row(
+            children: [
+              Icon(option.icon, color: selected ? _kAccent : Colors.white, size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      option.title,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      option.subtitle,
+                      style: TextStyle(
+                        color: selected ? _kAccent : _kTextSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (selected) const Icon(Icons.check_circle, color: _kAccent, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+

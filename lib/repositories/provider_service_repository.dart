@@ -77,6 +77,45 @@ class ProviderServiceRepository {
     await _client.from('provider_services').delete().eq('id', serviceId);
   }
 
+  /// Updates the caller's own listing — `provider_services_update_own`
+  /// (§17) restricts this to the row's own `user_id`. Always resets
+  /// `status` to `pending_review` and clears `is_verified`: an edited
+  /// listing is content an admin hasn't seen yet, so it goes back through
+  /// moderation the same as a brand-new one. [coverPhotos] is left
+  /// untouched (`null`) when the provider didn't pick a new photo.
+  Future<void> updateService({
+    required String serviceId,
+    required String category,
+    required String businessName,
+    required String description,
+    double? pricePerHour,
+    required String pricingType,
+    required Map<String, dynamic> details,
+    required List<String> coverageAreas,
+    required int advancePercentage,
+    required bool priceVisible,
+    required List<String> musicGenres,
+    List<String>? coverPhotos,
+  }) async {
+    final update = <String, dynamic>{
+      'category': category,
+      'business_name': businessName,
+      'description': description,
+      'price_per_hour': pricePerHour,
+      'pricing_type': pricingType,
+      'details': details,
+      'coverage_areas': coverageAreas,
+      'advance_percentage': advancePercentage,
+      'price_visible': priceVisible,
+      'music_genres': musicGenres,
+      'status': 'pending_review',
+      'is_verified': false,
+    };
+    if (coverPhotos != null) update['cover_photos'] = coverPhotos;
+
+    await _client.from('provider_services').update(update).eq('id', serviceId);
+  }
+
   /// Approves or rejects a pending service — same RLS restriction as
   /// [fetchPendingServices] applies to the write.
   Future<void> updateServiceStatus({
@@ -161,6 +200,31 @@ class ProviderServiceRepository {
     return path;
   }
 
+  /// Uploads a selfie captured live via the device camera — [photo] must
+  /// come from `ImagePicker(source: ImageSource.camera)`, never the
+  /// gallery, so the admin can trust it was taken at that moment. Goes to
+  /// `{userId}/selfie_...` in the same private `identity_documents` bucket
+  /// as the cédula: its RLS policies key only on the folder prefix, not
+  /// the filename, so no new policy is needed for this. Returns the
+  /// Storage PATH, same as [uploadIdentityDocument].
+  Future<String> uploadIdentitySelfie({
+    required XFile photo,
+    required String userId,
+  }) async {
+    final bytes = await photo.readAsBytes();
+    final path = '$userId/selfie_${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+    await _client.storage
+        .from(_identityDocsBucket)
+        .uploadBinary(
+          path,
+          bytes,
+          fileOptions: const FileOptions(contentType: 'image/jpeg'),
+        );
+
+    return path;
+  }
+
   String _identityDocContentType(String extension) {
     switch (extension) {
       case 'pdf':
@@ -187,6 +251,13 @@ class ProviderServiceRepository {
     double? pricePerHour,
     List<String> coverPhotos = const [],
     required String identityDocUrl,
+    required String selfieUrl,
+    required String pricingType,
+    Map<String, dynamic> details = const {},
+    List<String> coverageAreas = const [],
+    required int advancePercentage,
+    required bool priceVisible,
+    List<String> musicGenres = const [],
   }) async {
     if (_client.auth.currentUser?.id == null) {
       throw StateError('No hay una sesión activa.');
@@ -201,6 +272,13 @@ class ProviderServiceRepository {
         'price_per_hour': pricePerHour,
         'cover_photos': coverPhotos,
         'identity_doc_url': identityDocUrl,
+        'selfie_url': selfieUrl,
+        'pricing_type': pricingType,
+        'details': details,
+        'coverage_areas': coverageAreas,
+        'advance_percentage': advancePercentage,
+        'price_visible': priceVisible,
+        'music_genres': musicGenres,
       },
     );
   }

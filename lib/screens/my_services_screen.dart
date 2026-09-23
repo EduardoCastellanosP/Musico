@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/provider_service.dart';
 import '../repositories/provider_service_repository.dart';
+import 'availability_calendar_screen.dart';
 import 'widgets/services/create_service_modal.dart';
 import 'widgets/services/provider_service_management_card.dart';
 
@@ -52,33 +53,70 @@ class _MyServicesScreenState extends State<MyServicesScreen> {
     if (mounted) _load();
   }
 
-  void _editComingSoon() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Próximamente: Editar')),
+  Future<void> _openEditModal(ProviderService service) async {
+    final saved = await showEditServiceModal(context, service);
+    if (saved == true && mounted) _load();
+  }
+
+  void _openAvailability(ProviderService service) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => AvailabilityCalendarScreen(service: service)),
     );
   }
 
   Future<void> _confirmDelete(ProviderService service) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF17171D),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Eliminar servicio', style: TextStyle(color: Colors.white)),
-        content: Text(
-          '¿Seguro que quieres eliminar "${service.businessName}"? Esta acción no se puede deshacer.',
-          style: const TextStyle(color: _kTextSecondary),
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 420),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+          decoration: BoxDecoration(
+            color: _kBackground,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: _kAccent.withValues(alpha: 0.25)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '¿Eliminar este servicio?',
+                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '"${service.businessName}" se eliminará permanentemente. Esta acción no se puede deshacer.',
+                style: const TextStyle(color: _kTextSecondary, fontSize: 14, height: 1.4),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Cancelar', style: TextStyle(color: _kTextSecondary)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text('Eliminar', style: TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancelar', style: TextStyle(color: _kTextSecondary)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Eliminar', style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
       ),
     );
     if (confirmed != true) return;
@@ -194,8 +232,9 @@ class _MyServicesScreenState extends State<MyServicesScreen> {
           return ProviderServiceManagementCard(
             service: service,
             busy: _processingIds.contains(service.id),
-            onEdit: _editComingSoon,
+            onEdit: () => _openEditModal(service),
             onDelete: () => _confirmDelete(service),
+            onAvailability: () => _openAvailability(service),
           );
         },
       ),

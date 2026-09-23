@@ -13,18 +13,34 @@ abstract final class VideoOptimizer {
   /// preset, already a large cut from a raw phone-camera recording).
   /// Throws [StateError] if compression fails; callers should treat that as
   /// fatal rather than fall back to uploading the uncompressed source.
-  static Future<File> compressForUpload(String sourcePath) async {
-    final info = await VideoCompress.compressVideo(
-      sourcePath,
-      quality: VideoQuality.Res1280x720Quality,
-      deleteOrigin: false,
-      frameRate: 30,
-    );
-    final file = info?.file;
-    if (file == null) {
-      throw StateError('No pudimos comprimir el video.');
+  ///
+  /// [onProgress], if given, is called with real 0-100 values as the
+  /// native encoder reports them via `VideoCompress.compressProgress$` —
+  /// this is a genuine percentage, not a guess, which is why callers
+  /// showing a loading UI should prefer a determinate indicator over a
+  /// generic spinner when they have one.
+  static Future<File> compressForUpload(
+    String sourcePath, {
+    void Function(double progress)? onProgress,
+  }) async {
+    final subscription = onProgress == null
+        ? null
+        : VideoCompress.compressProgress$.subscribe(onProgress);
+    try {
+      final info = await VideoCompress.compressVideo(
+        sourcePath,
+        quality: VideoQuality.Res1280x720Quality,
+        deleteOrigin: false,
+        frameRate: 30,
+      );
+      final file = info?.file;
+      if (file == null) {
+        throw StateError('No pudimos comprimir el video.');
+      }
+      return file;
+    } finally {
+      subscription?.unsubscribe();
     }
-    return file;
   }
 
   /// A single JPEG frame from [sourcePath] — the "thumbnail first" half of

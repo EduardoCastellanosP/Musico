@@ -55,6 +55,7 @@ class ServiceInventoryCard extends StatelessWidget {
             controller: controller,
             maxLines: 6,
             minLines: 3,
+            textCapitalization: TextCapitalization.sentences,
             style: theme.textTheme.bodyLarge,
             decoration: InputDecoration(
               hintText: hint,

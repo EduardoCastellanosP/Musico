@@ -54,8 +54,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   /// Returns whether the update succeeded — [AdminServiceDetailModal] uses
   /// that to decide whether to close itself, while [_PendingServiceCard]'s
-  /// inline buttons just ignore it (the SnackBar/list update below already
-  /// covers that path).
+  /// inline buttons just ignore it (the result dialog/list update below
+  /// already covers that path).
   Future<bool> _review(ProviderService service, {required bool approve}) async {
     setState(() => _processingIds.add(service.id));
     try {
@@ -66,13 +66,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       );
 
       if (!mounted) return true;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            approve ? 'Servicio aprobado con éxito.' : 'Servicio rechazado.',
-          ),
-        ),
-      );
+      _showResultDialog(approve: approve);
       setState(() {
         _services?.removeWhere((s) => s.id == service.id);
         _processingIds.remove(service.id);
@@ -86,6 +80,70 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       setState(() => _processingIds.remove(service.id));
       return false;
     }
+  }
+
+  /// Simple centered result modal for approve/reject — same dark/gold
+  /// visual language as the provider-side dialogs (`create_service_modal
+  /// .dart`, `my_services_screen.dart`), just without their icon badge and
+  /// extra copy: this is an internal admin screen, not a client-facing one.
+  void _showResultDialog({required bool approve}) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 360),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+          decoration: BoxDecoration(
+            color: _kBackground,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: _kAccent.withValues(alpha: 0.25)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    approve ? Icons.check_circle_outline : Icons.cancel_outlined,
+                    color: approve ? _kAccent : Colors.redAccent,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      approve ? 'Verificación aprobada' : 'Servicio rechazado',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                approve
+                    ? 'El servicio ya es visible para los clientes en la Tarima.'
+                    : 'El servicio no aparecerá en la Tarima.',
+                style: const TextStyle(color: _kTextSecondary, fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: TextButton.styleFrom(foregroundColor: _kAccent),
+                  child: const Text('Cerrar', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _openDetail(ProviderService service) {
@@ -314,7 +372,7 @@ class _PendingServiceCard extends StatelessWidget {
                           ),
                           if (service.pricePerHour != null)
                             Text(
-                              formatCopPerHour(service.pricePerHour!),
+                              formatCopPriceForPricingType(service.pricePerHour!, service.pricingType),
                               style: const TextStyle(
                                 color: _kAccent,
                                 fontWeight: FontWeight.w700,

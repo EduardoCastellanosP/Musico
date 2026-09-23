@@ -52,3 +52,72 @@ class ServiceCoverImage extends StatelessWidget {
     );
   }
 }
+
+/// Full-width cover-photo carousel with a page-dot indicator — falls back
+/// to a single placeholder frame (via [ServiceCoverImage]'s own null
+/// handling) when the listing has no photos yet. Shared by
+/// `ServiceDetailScreen` and `AdminServiceDetailModal`'s client-preview
+/// tab so both read as the same carousel instead of two hand-maintained
+/// copies drifting apart.
+class ServicePhotoGallery extends StatelessWidget {
+  const ServicePhotoGallery({
+    super.key,
+    required this.photos,
+    required this.pageController,
+    required this.currentIndex,
+    required this.onPageChanged,
+    this.height = 240,
+    this.accentColor = const Color(0xFFFFB703),
+  });
+
+  final List<String> photos;
+  final PageController pageController;
+  final int currentIndex;
+  final ValueChanged<int> onPageChanged;
+  final double height;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final pageCount = photos.isEmpty ? 1 : photos.length;
+
+    return Stack(
+      alignment: Alignment.bottomCenter,
+      children: [
+        SizedBox(
+          height: height,
+          width: double.infinity,
+          child: PageView.builder(
+            controller: pageController,
+            onPageChanged: onPageChanged,
+            itemCount: pageCount,
+            itemBuilder: (context, index) {
+              final url = photos.isEmpty ? null : photos[index];
+              return ServiceCoverImage(url: url, width: double.infinity, height: height);
+            },
+          ),
+        ),
+        if (pageCount > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(pageCount, (i) {
+                final active = i == currentIndex;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.symmetric(horizontal: 3),
+                  width: active ? 8 : 6,
+                  height: active ? 8 : 6,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: active ? accentColor : Colors.white.withValues(alpha: 0.5),
+                  ),
+                );
+              }),
+            ),
+          ),
+      ],
+    );
+  }
+}

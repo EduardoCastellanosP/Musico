@@ -60,6 +60,7 @@ class AvailabilityTimeCard extends StatelessWidget {
             TextField(
               controller: availabilityNoteController,
               maxLines: 2,
+              textCapitalization: TextCapitalization.sentences,
               style: theme.textTheme.bodyLarge,
               decoration: const InputDecoration(
                 hintText:

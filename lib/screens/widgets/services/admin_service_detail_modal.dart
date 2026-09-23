@@ -62,6 +62,7 @@ class _AdminServiceDetailModalState extends State<AdminServiceDetailModal>
 
   int _photoIndex = 0;
   bool _busy = false;
+  Future<String>? _selfieSignedUrlFuture;
 
   @override
   void initState() {
@@ -70,6 +71,10 @@ class _AdminServiceDetailModalState extends State<AdminServiceDetailModal>
     final docPath = widget.service.identityDocUrl;
     if (docPath != null) {
       _signedUrlFuture = _repository.getIdentityDocumentSignedUrl(docPath);
+    }
+    final selfiePath = widget.service.selfieUrl;
+    if (selfiePath != null) {
+      _selfieSignedUrlFuture = _repository.getIdentityDocumentSignedUrl(selfiePath);
     }
   }
 
@@ -145,6 +150,7 @@ class _AdminServiceDetailModalState extends State<AdminServiceDetailModal>
                     _IdentityVerificationTab(
                       service: service,
                       signedUrlFuture: _signedUrlFuture,
+                      selfieSignedUrlFuture: _selfieSignedUrlFuture,
                     ),
                   ],
                 ),
@@ -249,7 +255,7 @@ class _ClientPreviewTab extends StatelessWidget {
       controller: scrollController,
       padding: EdgeInsets.zero,
       children: [
-        _PhotoGallery(
+        ServicePhotoGallery(
           photos: service.coverPhotos,
           pageController: pageController,
           currentIndex: photoIndex,
@@ -274,7 +280,7 @@ class _ClientPreviewTab extends StatelessWidget {
                   ),
                   if (service.pricePerHour != null)
                     Text(
-                      formatCopPerHour(service.pricePerHour!),
+                      formatCopPriceForPricingType(service.pricePerHour!, service.pricingType),
                       style: const TextStyle(
                         color: _kAccent,
                         fontSize: 16,
@@ -322,10 +328,12 @@ class _IdentityVerificationTab extends StatelessWidget {
   const _IdentityVerificationTab({
     required this.service,
     required this.signedUrlFuture,
+    required this.selfieSignedUrlFuture,
   });
 
   final ProviderService service;
   final Future<String>? signedUrlFuture;
+  final Future<String>? selfieSignedUrlFuture;
 
   @override
   Widget build(BuildContext context) {
@@ -338,9 +346,31 @@ class _IdentityVerificationTab extends StatelessWidget {
         const SizedBox(height: 10),
         _OwnerRow(service: service),
         const SizedBox(height: 24),
-        const _SectionLabel('Documento de identidad'),
+        const _SectionLabel('Documento de identidad vs. selfie'),
+        const SizedBox(height: 4),
+        const Text(
+          'Compara el rostro de la cédula contra la selfie para confirmar que es la misma persona.',
+          style: TextStyle(color: _kTextSecondary, fontSize: 12),
+        ),
         const SizedBox(height: 10),
-        _IdentityDocumentViewer(signedUrlFuture: signedUrlFuture),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _IdentityDocumentViewer(
+                signedUrlFuture: signedUrlFuture,
+                emptyMessage: 'Sin documento de identidad registrado.',
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _IdentityDocumentViewer(
+                signedUrlFuture: selfieSignedUrlFuture,
+                emptyMessage: 'Sin selfie registrada.',
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 14),
         Row(
           children: [
@@ -378,19 +408,22 @@ class _IdentityVerificationTab extends StatelessWidget {
 /// button (via `url_launcher`, since Flutter has no built-in PDF viewer)
 /// for anything else — a PDF cédula chiefly.
 class _IdentityDocumentViewer extends StatelessWidget {
-  const _IdentityDocumentViewer({required this.signedUrlFuture});
+  const _IdentityDocumentViewer({
+    required this.signedUrlFuture,
+    required this.emptyMessage,
+  });
 
   final Future<String>? signedUrlFuture;
+  final String emptyMessage;
+
+  static const double _height = 180;
 
   @override
   Widget build(BuildContext context) {
     final future = signedUrlFuture;
     if (future == null) {
       return _frame(
-        child: const Text(
-          'Este servicio no tiene un documento de identidad registrado.',
-          style: TextStyle(color: _kTextSecondary),
-        ),
+        child: Text(emptyMessage, style: const TextStyle(color: _kTextSecondary)),
       );
     }
 
@@ -405,7 +438,7 @@ class _IdentityDocumentViewer extends StatelessWidget {
         if (snapshot.hasError || !snapshot.hasData) {
           return _frame(
             child: const Text(
-              'No se pudo generar el enlace del documento.',
+              'No se pudo generar el enlace.',
               style: TextStyle(color: Colors.redAccent),
             ),
           );
@@ -421,12 +454,12 @@ class _IdentityDocumentViewer extends StatelessWidget {
             borderRadius: BorderRadius.circular(14),
             child: Image.network(
               signedUrl,
-              height: 220,
+              height: _height,
               width: double.infinity,
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) => _frame(
                 child: const Text(
-                  'No se pudo cargar la imagen del documento.',
+                  'No se pudo cargar la imagen.',
                   style: TextStyle(color: Colors.redAccent),
                 ),
               ),
@@ -446,7 +479,7 @@ class _IdentityDocumentViewer extends StatelessWidget {
                   mode: LaunchMode.externalApplication,
                 ),
                 icon: const Icon(Icons.open_in_new, size: 18),
-                label: const Text('Abrir documento'),
+                label: const Text('Abrir'),
               ),
             ],
           ),
@@ -458,74 +491,14 @@ class _IdentityDocumentViewer extends StatelessWidget {
   Widget _frame({required Widget child}) {
     return Container(
       width: double.infinity,
-      height: 220,
+      height: _height,
       alignment: Alignment.center,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: _kSurface,
         borderRadius: BorderRadius.circular(14),
       ),
       child: child,
-    );
-  }
-}
-
-/// Cover-photo carousel with a page indicator — falls back to a single
-/// placeholder frame (via [ServiceCoverImage]'s own null handling) when the
-/// listing has no photos yet.
-class _PhotoGallery extends StatelessWidget {
-  const _PhotoGallery({
-    required this.photos,
-    required this.pageController,
-    required this.currentIndex,
-    required this.onPageChanged,
-  });
-
-  final List<String> photos;
-  final PageController pageController;
-  final int currentIndex;
-  final ValueChanged<int> onPageChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final pageCount = photos.isEmpty ? 1 : photos.length;
-
-    return Stack(
-      alignment: Alignment.bottomCenter,
-      children: [
-        SizedBox(
-          height: 240,
-          child: PageView.builder(
-            controller: pageController,
-            onPageChanged: onPageChanged,
-            itemCount: pageCount,
-            itemBuilder: (context, index) {
-              final url = photos.isEmpty ? null : photos[index];
-              return ServiceCoverImage(url: url, width: double.infinity, height: 240);
-            },
-          ),
-        ),
-        if (pageCount > 1)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(pageCount, (i) {
-                final active = i == currentIndex;
-                return AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  width: active ? 8 : 6,
-                  height: active ? 8 : 6,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: active ? _kAccent : Colors.white.withValues(alpha: 0.5),
-                  ),
-                );
-              }),
-            ),
-          ),
-      ],
     );
   }
 }

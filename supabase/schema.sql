@@ -1597,3 +1597,636 @@ alter table public.provider_services add constraint provider_services_category_c
 alter table public.provider_services add column if not exists todays_event text;
 
 comment on column public.provider_services.todays_event is 'Solo relevante para category = ''Discoteca'': breve texto del evento/programación de hoy, mostrado en NightclubCard. Null en cualquier otra categoría.';
+
+-- =========================================================
+-- 24. Selfie de verificación de identidad (KYC)
+-- Complementa identity_doc_url (sección 20): el admin ahora puede comparar
+-- la foto de la cédula contra una selfie tomada en vivo con la cámara para
+-- confirmar que es la misma persona antes de aprobar. Reutiliza el bucket
+-- privado `identity_documents` con el mismo prefijo de carpeta `{uid}/...`
+-- que ya usa la cédula — las policies de esa sección (select_own/
+-- select_admin/insert/delete_own) filtran solo por ese prefijo, no por
+-- nombre de archivo, así que ya cubren la selfie sin ninguna policy nueva
+-- de storage. Nullable por la misma razón que identity_doc_url: filas
+-- existentes no tienen selfie y no hay valor por defecto razonable; lo
+-- obligatorio (documento + selfie) se valida en CreateServiceModal.
+-- =========================================================
+alter table public.provider_services add column if not exists selfie_url text;
+
+comment on column public.provider_services.selfie_url is 'Ruta privada (no URL pública) de la selfie tomada en vivo con la cámara, en el mismo bucket `identity_documents` que identity_doc_url. Se usa para comparar visualmente contra la cédula durante la moderación.';
+
+-- Reemplaza create_provider_service_with_consent (sección 20) para que
+-- también guarde selfie_url en la misma transacción que el resto del KYC.
+-- El drop explícito es necesario porque Postgres distingue funciones por
+-- firma: un `create or replace` con una lista de parámetros distinta crea
+-- una función nueva en vez de reemplazar la de 6 argumentos.
+drop function if exists public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text
+);
+
+create or replace function public.create_provider_service_with_consent(
+  category text,
+  business_name text,
+  description text,
+  price_per_hour numeric,
+  cover_photos text[],
+  identity_doc_url text,
+  selfie_url text
+)
+returns uuid
+language plpgsql
+security invoker
+as $$
+declare
+  me uuid := auth.uid();
+  new_id uuid;
+begin
+  if me is null then
+    raise exception 'No hay una sesión activa.';
+  end if;
+
+  insert into public.provider_services (
+    user_id, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, selfie_url, habeas_data_accepted_at
+  )
+  values (
+    me, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, selfie_url, now()
+  )
+  returning id into new_id;
+
+  insert into public.user_consents (user_id, consent_type, accepted_version)
+  values (me, 'identity_document_habeas_data', '1.0');
+
+  return new_id;
+end;
+$$;
+
+grant execute on function public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text, text
+) to authenticated;
+
+-- =========================================================
+-- 25. Tarifas flexibles + detalles por categoría
+--
+-- El check de `category` (secciones 17/23) solo permitía 6 valores, pero
+-- `kServiceCategories` en el formulario Flutter ya ofrecía 12 (Catering,
+-- Fotografía, Estudio de grabación, Decoracion y ambientación, Transporte,
+-- Otros nunca estuvieron en la lista permitida). Elegir cualquiera de esos
+-- y guardar rompía el insert con una violación de constraint — se descubrió
+-- al construir esta sección, no algo que introduzca. Los 12 valores de
+-- abajo son una copia BYTE A BYTE de esa lista, incluyendo el typo real que
+-- ya tiene ('Decoracion y ambientación', sin tilde en "Decoracion") — no se
+-- corrige aquí porque filas ya insertadas con ese texto exacto dejarían de
+-- pasar el constraint si solo se permitiera la ortografía correcta.
+alter table public.provider_services drop constraint if exists provider_services_category_check;
+alter table public.provider_services add constraint provider_services_category_check
+  check (category in (
+    'Agrupación', 'Solista', 'DJ', 'Sonido', 'Ensayadero', 'Discoteca',
+    'Catering', 'Fotografía', 'Estudio de grabación',
+    'Decoracion y ambientación', 'Transporte', 'Otros'
+  ));
+
+-- `pricing_type` decide cómo se rotula/interpreta `price_per_hour` — la
+-- columna numérica no se renombra (ya la usan `NightclubCard` como "Cover",
+-- el RPC de creación, y varios widgets de la Tarima); solo cambia qué
+-- significa el número. Default 'per_hour' porque es el comportamiento que
+-- ya tenía toda fila existente antes de esta sección.
+alter table public.provider_services add column if not exists pricing_type text
+  not null default 'per_hour'
+  check (pricing_type in ('per_hour', 'fixed', 'per_night'));
+
+comment on column public.provider_services.pricing_type is 'Cómo se cotiza price_per_hour: per_hour (por hora), fixed (tarifa fija de paquete/evento) o per_night (por noche completa). Sugerido por categoría en CreateServiceModal, editable por el proveedor.';
+
+-- Backfill: las únicas categorías que ya existían y encajan naturalmente en
+-- "por noche completa" son DJ y Discoteca (Discoteca ya usaba
+-- price_per_hour como el valor del "Cover" nocturno, ver sección 23).
+-- Cualquier fila nueva llega con el pricing_type que el formulario mande.
+update public.provider_services
+set pricing_type = 'per_night'
+where category in ('DJ', 'Discoteca');
+
+-- `details` guarda los campos opcionales que varían por categoría (género
+-- musical, aforo, tipo de menú, zona de cobertura...) — jsonb en vez de una
+-- columna por campo o una tabla separada: son ~15 atributos opcionales que
+-- ninguna consulta necesita filtrar/indexar todavía, así que columnas
+-- sueltas dejarían la mayoría en null por fila y una tabla normalizada
+-- exigiría FKs y RLS duplicada por poco beneficio real hoy.
+alter table public.provider_services add column if not exists details jsonb not null default '{}'::jsonb;
+
+comment on column public.provider_services.details is 'Bolsa de atributos opcionales específicos de la categoría (género musical, aforo, tipo de menú, zona de cobertura, etc.), llenados dinámicamente por CreateServiceModal según `category`. Claves libres, sin esquema fijo — ver la constante _kCategoryDetailFields en el cliente Flutter para el mapeo vigente categoría → campos.';
+
+-- Reemplaza create_provider_service_with_consent (secciones 20/24) para
+-- que también guarde pricing_type y details en la misma transacción.
+drop function if exists public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text, text
+);
+
+create or replace function public.create_provider_service_with_consent(
+  category text,
+  business_name text,
+  description text,
+  price_per_hour numeric,
+  cover_photos text[],
+  identity_doc_url text,
+  selfie_url text,
+  pricing_type text,
+  details jsonb
+)
+returns uuid
+language plpgsql
+security invoker
+as $$
+declare
+  me uuid := auth.uid();
+  new_id uuid;
+begin
+  if me is null then
+    raise exception 'No hay una sesión activa.';
+  end if;
+
+  insert into public.provider_services (
+    user_id, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, selfie_url, pricing_type, details,
+    habeas_data_accepted_at
+  )
+  values (
+    me, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, selfie_url, pricing_type, details,
+    now()
+  )
+  returning id into new_id;
+
+  insert into public.user_consents (user_id, consent_type, accepted_version)
+  values (me, 'identity_document_habeas_data', '1.0');
+
+  return new_id;
+end;
+$$;
+
+grant execute on function public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text, text, text, jsonb
+) to authenticated;
+
+-- =========================================================
+-- 26. Zona de cobertura como columna indexable
+--
+-- Sale de `details` (jsonb, sección 25) a su propia columna: el objetivo
+-- es que un cliente en Girón pueda encontrar proveedores con sede en
+-- Bucaramanga que también cubran Girón, lo que exige poder filtrar por
+-- ciudad de forma eficiente — algo que jsonb no ofrece sin desempacar cada
+-- fila. Mismo patrón que `profiles.coverage_cities` (sección 1), que ya
+-- resuelve el mismo problema para el radio de desplazamiento de un músico.
+alter table public.provider_services add column if not exists coverage_areas text[] not null default '{}';
+
+comment on column public.provider_services.coverage_areas is 'Ciudades/municipios adicionales que este servicio cubre, más allá de la ciudad base del proveedor (`profiles.city`). Alimentado por el input de chips en CreateServiceModal. Pensado para filtrar la Tarima por ciudad (aún no construido) — por eso vive en su propia columna indexable y no dentro de `details`.';
+
+create index if not exists provider_services_coverage_areas_idx
+  on public.provider_services using gin (coverage_areas);
+
+-- Reemplaza create_provider_service_with_consent (secciones 20/24/25) para
+-- que también guarde coverage_areas en la misma transacción.
+drop function if exists public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text, text, text, jsonb
+);
+
+create or replace function public.create_provider_service_with_consent(
+  category text,
+  business_name text,
+  description text,
+  price_per_hour numeric,
+  cover_photos text[],
+  identity_doc_url text,
+  selfie_url text,
+  pricing_type text,
+  details jsonb,
+  coverage_areas text[]
+)
+returns uuid
+language plpgsql
+security invoker
+as $$
+declare
+  me uuid := auth.uid();
+  new_id uuid;
+begin
+  if me is null then
+    raise exception 'No hay una sesión activa.';
+  end if;
+
+  insert into public.provider_services (
+    user_id, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, selfie_url, pricing_type, details,
+    coverage_areas, habeas_data_accepted_at
+  )
+  values (
+    me, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, selfie_url, pricing_type, details,
+    coverage_areas, now()
+  )
+  returning id into new_id;
+
+  insert into public.user_consents (user_id, consent_type, accepted_version)
+  values (me, 'identity_document_habeas_data', '1.0');
+
+  return new_id;
+end;
+$$;
+
+grant execute on function public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text, text, text, jsonb, text[]
+) to authenticated;
+
+-- =========================================================
+-- 27. Porcentaje de anticipo económico (Sistema Anti-Fuga)
+--
+-- El estado `pending_advance` de `bookings` (más arriba) ya nombraba este
+-- concepto, pero no existía ninguna columna, RPC ni UI que lo calculara o
+-- guardara — terreno limpio, sin flujo de negociación con el que este
+-- campo pueda entrar en conflicto. El proveedor fija su tasa estándar al
+-- crear el servicio; el monto en pesos NUNCA se guarda (se recalcula
+-- siempre como `price_per_hour * advance_percentage / 100`, ver
+-- `advanceAmountFor` en `lib/core/utils/currency.dart`), así que cuando el
+-- flujo real de cobro del adelanto se construya, reutiliza ese mismo
+-- cálculo en vez de canonizar un número que se desincroniza si el precio
+-- cambia.
+alter table public.provider_services add column if not exists advance_percentage integer
+  not null default 20
+  check (advance_percentage in (10, 20, 30, 40, 50));
+
+comment on column public.provider_services.advance_percentage is 'Porcentaje del precio que el cliente debe pagar como anticipo para asegurar la reserva (Sistema Anti-Fuga). El MONTO no se guarda aquí — se calcula siempre a partir de este porcentaje y price_per_hour vigente.';
+
+-- Reemplaza create_provider_service_with_consent (secciones 20/24/25/26)
+-- para que también guarde advance_percentage en la misma transacción.
+drop function if exists public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text, text, text, jsonb, text[]
+);
+
+create or replace function public.create_provider_service_with_consent(
+  category text,
+  business_name text,
+  description text,
+  price_per_hour numeric,
+  cover_photos text[],
+  identity_doc_url text,
+  selfie_url text,
+  pricing_type text,
+  details jsonb,
+  coverage_areas text[],
+  advance_percentage integer
+)
+returns uuid
+language plpgsql
+security invoker
+as $$
+declare
+  me uuid := auth.uid();
+  new_id uuid;
+begin
+  if me is null then
+    raise exception 'No hay una sesión activa.';
+  end if;
+
+  insert into public.provider_services (
+    user_id, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, selfie_url, pricing_type, details,
+    coverage_areas, advance_percentage, habeas_data_accepted_at
+  )
+  values (
+    me, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, selfie_url, pricing_type, details,
+    coverage_areas, advance_percentage, now()
+  )
+  returning id into new_id;
+
+  insert into public.user_consents (user_id, consent_type, accepted_version)
+  values (me, 'identity_document_habeas_data', '1.0');
+
+  return new_id;
+end;
+$$;
+
+grant execute on function public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text, text, text, jsonb, text[], integer
+) to authenticated;
+
+-- =========================================================
+-- 28. Precio a convenir (ocultar price_per_hour al cliente)
+--
+-- El precio SIGUE siendo obligatorio y se guarda igual que siempre —
+-- `price_visible` solo decide si el cliente lo ve o ve "Precio a
+-- convenir". El número real sigue disponible para el proveedor (preview
+-- de anticipo en CreateServiceModal) y como ancla para las
+-- contrapropuestas del motor de reservas, sin romper ningún filtro/orden
+-- que ya dependa de price_per_hour.
+alter table public.provider_services add column if not exists price_visible boolean not null default true;
+
+comment on column public.provider_services.price_visible is 'Si es false, el cliente ve "Precio a convenir" en vez del monto real de price_per_hour (Tarima, ServiceDetailScreen, Condiciones de reserva). El precio sigue guardándose y usándose internamente (preview de anticipo, contrapropuestas) sin importar este flag.';
+
+-- Reemplaza create_provider_service_with_consent (secciones 20/24/25/26/27)
+-- para que también guarde price_visible en la misma transacción.
+drop function if exists public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text, text, text, jsonb, text[], integer
+);
+
+create or replace function public.create_provider_service_with_consent(
+  category text,
+  business_name text,
+  description text,
+  price_per_hour numeric,
+  cover_photos text[],
+  identity_doc_url text,
+  selfie_url text,
+  pricing_type text,
+  details jsonb,
+  coverage_areas text[],
+  advance_percentage integer,
+  price_visible boolean
+)
+returns uuid
+language plpgsql
+security invoker
+as $$
+declare
+  me uuid := auth.uid();
+  new_id uuid;
+begin
+  if me is null then
+    raise exception 'No hay una sesión activa.';
+  end if;
+
+  insert into public.provider_services (
+    user_id, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, selfie_url, pricing_type, details,
+    coverage_areas, advance_percentage, price_visible, habeas_data_accepted_at
+  )
+  values (
+    me, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, selfie_url, pricing_type, details,
+    coverage_areas, advance_percentage, price_visible, now()
+  )
+  returning id into new_id;
+
+  insert into public.user_consents (user_id, consent_type, accepted_version)
+  values (me, 'identity_document_habeas_data', '1.0');
+
+  return new_id;
+end;
+$$;
+
+grant execute on function public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text, text, text, jsonb, text[], integer, boolean
+) to authenticated;
+
+-- =========================================================
+-- 29. Géneros musicales como columna indexable
+--
+-- Sale del campo `genre` que vivía suelto dentro de `details` (jsonb,
+-- sección 25) a su propia columna — mismo motivo que `coverage_areas`
+-- (sección 26): el objetivo es que un cliente pueda filtrar la Tarima por
+-- género ("quiero una agrupación que toque vallenato"), algo que jsonb no
+-- permite indexar/filtrar eficientemente. Solo aplica a 'Solista', 'DJ' y
+-- 'Agrupación' — el resto de categorías nunca lo llenan.
+alter table public.provider_services add column if not exists music_genres text[] not null default '{}';
+
+comment on column public.provider_services.music_genres is 'Géneros musicales que este servicio toca (Vallenato, Salsa, etc.) — solo relevante para category en (''Solista'', ''DJ'', ''Agrupación''). Reemplaza el campo `genre` que antes vivía dentro de `details`; ahora es su propia columna indexable para poder filtrar la Tarima por género a futuro.';
+
+create index if not exists provider_services_music_genres_idx
+  on public.provider_services using gin (music_genres);
+
+-- Reemplaza create_provider_service_with_consent (secciones 20/24/25/26/
+-- 27/28) para que también guarde music_genres en la misma transacción.
+drop function if exists public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text, text, text, jsonb, text[], integer, boolean
+);
+
+create or replace function public.create_provider_service_with_consent(
+  category text,
+  business_name text,
+  description text,
+  price_per_hour numeric,
+  cover_photos text[],
+  identity_doc_url text,
+  selfie_url text,
+  pricing_type text,
+  details jsonb,
+  coverage_areas text[],
+  advance_percentage integer,
+  price_visible boolean,
+  music_genres text[]
+)
+returns uuid
+language plpgsql
+security invoker
+as $$
+declare
+  me uuid := auth.uid();
+  new_id uuid;
+begin
+  if me is null then
+    raise exception 'No hay una sesión activa.';
+  end if;
+
+  insert into public.provider_services (
+    user_id, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, selfie_url, pricing_type, details,
+    coverage_areas, advance_percentage, price_visible, music_genres,
+    habeas_data_accepted_at
+  )
+  values (
+    me, category, business_name, description, price_per_hour,
+    cover_photos, identity_doc_url, selfie_url, pricing_type, details,
+    coverage_areas, advance_percentage, price_visible, music_genres,
+    now()
+  )
+  returning id into new_id;
+
+  insert into public.user_consents (user_id, consent_type, accepted_version)
+  values (me, 'identity_document_habeas_data', '1.0');
+
+  return new_id;
+end;
+$$;
+
+grant execute on function public.create_provider_service_with_consent(
+  text, text, text, numeric, text[], text, text, text, jsonb, text[], integer, boolean, text[]
+) to authenticated;
+
+-- =========================================================
+-- 30. Control de visibilidad pública por video (`musician_videos`)
+--
+-- El músico ya sube sus videos como siempre (sección 11); esto añade un
+-- interruptor explícito por video para decidir cuáles aparecen en la
+-- pestaña "Portafolio" del cliente (`ServiceDetailScreen`) — antes esa
+-- pestaña ni siquiera leía `musician_videos`. Default `true`: la copia
+-- de "Mi Estado" ya le dice al músico que suba fotos/videos para publicar
+-- su perfil, así que ocultar todo por defecto lo dejaría con un
+-- portafolio vacío sin ninguna señal de por qué. El interruptor es para
+-- que oculte un video puntual, no para exigirle opt-in en cada uno.
+alter table public.musician_videos add column if not exists show_in_profile boolean not null default true;
+
+comment on column public.musician_videos.show_in_profile is 'Si es false, el video no aparece en la pestaña "Portafolio" del cliente aunque sí sigue en la galería de gestión del propio proveedor. Editable en cualquier momento desde MediaManagerCard.';
+
+drop policy if exists "musician_videos_update_own" on public.musician_videos;
+create policy "musician_videos_update_own"
+  on public.musician_videos
+  for update
+  to authenticated
+  using (auth.uid() = musician_id)
+  with check (auth.uid() = musician_id);
+
+-- El grant de columna es lo que de verdad protege `views_count`: la
+-- policy de arriba solo filtra QUÉ FILA se puede tocar, no qué columna,
+-- así que sin esto el propio dueño podría inflar su contador con un
+-- `.update()` directo — justo lo que la sección 11 dejó deliberadamente
+-- bloqueado al no tener ninguna policy de update. `revoke` primero
+-- porque el bootstrap de Supabase ya otorga `update` de tabla completa a
+-- `authenticated` por defecto.
+revoke update on public.musician_videos from authenticated;
+grant update (show_in_profile) on public.musician_videos to authenticated;
+
+-- =========================================================
+-- 31. Video ↔ servicio específico (evita que un video de "Solista" se
+-- mezcle con el portafolio de "Sonido" del mismo proveedor)
+--
+-- `musician_videos.musician_id` apunta a `profiles`, no a
+-- `provider_services` — un mismo proveedor puede tener varias filas en
+-- `provider_services` (categorías distintas), así que hasta ahora TODOS
+-- sus videos aparecían mezclados en el portafolio público de CUALQUIERA
+-- de sus servicios. `service_id` NULLABLE es el mecanismo, no un limbo:
+-- null significa "se muestra en todos los servicios de este proveedor"
+-- — exactamente el comportamiento heredado de antes de esta columna —
+-- así que ningún video existente pierde visibilidad el día que se
+-- aplique esta migración.
+alter table public.musician_videos add column if not exists service_id uuid
+  references public.provider_services (id) on delete set null;
+
+comment on column public.musician_videos.service_id is 'A qué provider_services pertenece este video. Null = se muestra en el portafolio de TODOS los servicios de este proveedor (comportamiento heredado). Asignable/reasignable en cualquier momento desde MediaManagerCard.';
+
+create index if not exists musician_videos_service_id_idx
+  on public.musician_videos (service_id);
+
+-- Backfill: solo para proveedores con exactamente un servicio, la única
+-- asignación no ambigua posible — con 2+ servicios no hay forma correcta
+-- de adivinar cuál, así que esos quedan en null (visibles en todos,
+-- igual que hoy) hasta que el proveedor los categorice manualmente.
+update public.musician_videos mv
+set service_id = ps.id
+from public.provider_services ps
+where mv.musician_id = ps.user_id
+  and mv.service_id is null
+  and (
+    select count(*) from public.provider_services ps2 where ps2.user_id = mv.musician_id
+  ) = 1;
+
+-- Mismo motivo que el grant de columna de la sección 30: la policy
+-- `musician_videos_update_own` ya cubre la fila, este grant es lo que
+-- permite tocar esta columna en particular sin reabrir `views_count`.
+grant update (service_id) on public.musician_videos to authenticated;
+
+-- =========================================================
+-- 32. Calendario de disponibilidad por servicio
+-- (`provider_unavailability`)
+--
+-- Un día bloqueado por el proveedor para UN `provider_services` puntual
+-- (no para todos sus servicios a la vez) — un músico con "Solista" y
+-- "Agrupación" puede estar libre para uno y ocupado para el otro el
+-- mismo día. La sola presencia de una fila (service_id, date) significa
+-- "ocupado"; no hay columna de estado que alternar.
+-- =========================================================
+create table if not exists public.provider_unavailability (
+  id          uuid primary key default gen_random_uuid(),
+  service_id  uuid not null references public.provider_services (id) on delete cascade,
+  date        date not null,
+  created_at  timestamptz not null default now(),
+  constraint provider_unavailability_unique unique (service_id, date)
+);
+
+comment on table public.provider_unavailability is 'Días bloqueados por el proveedor para un provider_services específico. Cada fila = un día ocupado; borrar la fila = volver a disponible.';
+
+create index if not exists provider_unavailability_service_id_idx
+  on public.provider_unavailability (service_id, date);
+
+alter table public.provider_unavailability enable row level security;
+
+-- El propio proveedor administra el calendario de sus servicios: las
+-- cuatro policies verifican dueño vía `provider_services.user_id`, la
+-- misma FK que ya usa `provider_services_update_own` (sección 17).
+drop policy if exists "provider_unavailability_select_own" on public.provider_unavailability;
+create policy "provider_unavailability_select_own"
+  on public.provider_unavailability
+  for select
+  to authenticated
+  using (
+    exists (
+      select 1 from public.provider_services ps
+      where ps.id = service_id and ps.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "provider_unavailability_insert_own" on public.provider_unavailability;
+create policy "provider_unavailability_insert_own"
+  on public.provider_unavailability
+  for insert
+  to authenticated
+  with check (
+    exists (
+      select 1 from public.provider_services ps
+      where ps.id = service_id and ps.user_id = auth.uid()
+    )
+  );
+
+drop policy if exists "provider_unavailability_delete_own" on public.provider_unavailability;
+create policy "provider_unavailability_delete_own"
+  on public.provider_unavailability
+  for delete
+  to authenticated
+  using (
+    exists (
+      select 1 from public.provider_services ps
+      where ps.id = service_id and ps.user_id = auth.uid()
+    )
+  );
+
+-- =========================================================
+-- 33. Franjas de horario dentro de un día (`provider_unavailability`)
+--
+-- Hasta ahora una fila = un día completo ocupado, con máximo una fila por
+-- fecha (`provider_unavailability_unique`). Para bloquear solo un tramo
+-- del día (ej. 7am-9am) sin ocupar el día entero, la tabla necesita poder
+-- guardar VARIAS filas para la misma fecha. `start_time`/`end_time`
+-- ambos null sigue significando "día completo", igual que antes; con
+-- valores, la fila es una franja puntual. Mutua exclusión entre "día
+-- completo" y "franjas" para la misma fecha se resuelve en la app (al
+-- marcar día completo se borran las franjas existentes y viceversa), no
+-- acá, para no encadenar constraints entre filas distintas.
+-- =========================================================
+alter table public.provider_unavailability
+  drop constraint if exists provider_unavailability_unique;
+
+alter table public.provider_unavailability
+  add column if not exists start_time time,
+  add column if not exists end_time time;
+
+alter table public.provider_unavailability
+  drop constraint if exists provider_unavailability_time_range_check;
+alter table public.provider_unavailability
+  add constraint provider_unavailability_time_range_check
+  check (
+    (start_time is null and end_time is null)
+    or (start_time is not null and end_time is not null and end_time > start_time)
+  );
+
+comment on column public.provider_unavailability.start_time is 'Null junto con end_time = día completo bloqueado. Con valor = inicio de una franja horaria puntual dentro del día.';
+comment on column public.provider_unavailability.end_time is 'Ver comentario de start_time.';
+
+-- Como máximo UN bloqueo de "día completo" por fecha.
+create unique index if not exists provider_unavailability_full_day_unique
+  on public.provider_unavailability (service_id, date)
+  where start_time is null and end_time is null;
+
+-- Evita agregar la misma franja dos veces por accidente; no limita
+-- cuántas franjas DISTINTAS puede tener una misma fecha.
+create unique index if not exists provider_unavailability_slot_unique
+  on public.provider_unavailability (service_id, date, start_time, end_time)
+  where start_time is not null;

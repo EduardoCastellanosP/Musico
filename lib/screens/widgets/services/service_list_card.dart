@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/utils/currency.dart';
 import '../../../models/provider_service.dart';
 import 'service_cover_image.dart';
 
@@ -302,6 +301,15 @@ class ServiceListCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 6),
                       ServiceGenrePill(text: service.category.toUpperCase()),
+                      if (service.musicGenres.isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          service.musicGenres.join(', '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: _kTextSecondary, fontSize: 11),
+                        ),
+                      ],
                       const SizedBox(height: 6),
                       ServiceRatingRow(
                         rating: service.rating,
@@ -325,11 +333,11 @@ class ServiceListCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (service.pricePerHour != null)
+                if (service.clientPriceLabel != null)
                   Padding(
                     padding: const EdgeInsets.only(left: 8),
                     child: Text(
-                      formatCopPrice(service.pricePerHour!),
+                      service.clientPriceLabel!,
                       style: const TextStyle(color: _kAccent, fontWeight: FontWeight.w700),
                     ),
                   ),

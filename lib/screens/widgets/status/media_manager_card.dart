@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../core/constants/media_limits.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/musician_video.dart';
+import '../../../models/provider_service.dart';
 import '../../in_app_video_player_screen.dart';
 
 /// "Multimedia" section of "Mi Estado": two capped grids — up to
@@ -22,6 +23,9 @@ class MediaManagerCard extends StatelessWidget {
     required this.onRemovePhoto,
     required this.onAddVideo,
     required this.onRemoveVideo,
+    required this.onToggleVideoVisibility,
+    required this.providerServices,
+    required this.onReassignVideoService,
   });
 
   final List<String> photos;
@@ -32,6 +36,19 @@ class MediaManagerCard extends StatelessWidget {
   final ValueChanged<String> onRemovePhoto;
   final VoidCallback onAddVideo;
   final ValueChanged<MusicianVideo> onRemoveVideo;
+
+  /// Called with the video and the new desired `show_in_profile` value
+  /// right after the provider flips its switch.
+  final void Function(MusicianVideo video, bool showInProfile) onToggleVideoVisibility;
+
+  /// This provider's own `provider_services` listings — needed to render
+  /// which one each video is tagged with (or "todos mis servicios" if
+  /// [MusicianVideo.serviceId] is null). See `supabase/schema.sql` §31.
+  final List<ProviderService> providerServices;
+
+  /// Called when the provider taps a video's service tag to re-categorize
+  /// it — [StatusScreen] owns the actual picker UI and persistence.
+  final ValueChanged<MusicianVideo> onReassignVideoService;
 
   void _onAddPhotoTapped(BuildContext context) {
     if (photos.length >= MediaLimits.maxPhotos) {
@@ -114,6 +131,16 @@ class MediaManagerCard extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           _SectionLabel('Videos (${videos.length}/${MediaLimits.maxVideos})'),
+          if (videos.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              'El ícono de ojo controla si un video aparece en tu perfil público de '
+              'clientes (siempre se ve aquí en tu feed, sin importar esa '
+              'configuración). El ícono de tienda indica a qué servicio pertenece '
+              '— tócalo para reasignarlo.',
+              style: theme.textTheme.bodySmall?.copyWith(color: extension?.textSecondary),
+            ),
+          ],
           const SizedBox(height: 8),
           _MediaGrid(
             itemCount: videos.length + 1,
@@ -129,7 +156,10 @@ class MediaManagerCard extends StatelessWidget {
               final video = videos[index];
               return _VideoTile(
                 video: video,
+                serviceLabel: _serviceLabelFor(video, providerServices),
                 onRemove: () => onRemoveVideo(video),
+                onToggleVisibility: (visible) => onToggleVideoVisibility(video, visible),
+                onTapService: () => onReassignVideoService(video),
               );
             },
           ),
@@ -137,6 +167,21 @@ class MediaManagerCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// "Todos mis servicios" when [MusicianVideo.serviceId] is null, or the
+/// matching listing's name — falls back to the same "todos" text if the
+/// id doesn't match anything (e.g. the service was deleted after the
+/// video was tagged; `on delete set null` means this shouldn't actually
+/// happen, but a stale reference is still safer to treat as "unassigned"
+/// than to crash on a missing match).
+String _serviceLabelFor(MusicianVideo video, List<ProviderService> services) {
+  final serviceId = video.serviceId;
+  if (serviceId == null) return 'Todos mis servicios';
+  for (final service in services) {
+    if (service.id == serviceId) return '${service.businessName} (${service.category})';
+  }
+  return 'Todos mis servicios';
 }
 
 class _SectionLabel extends StatelessWidget {
@@ -292,10 +337,19 @@ class _PhotoTile extends StatelessWidget {
 }
 
 class _VideoTile extends StatelessWidget {
-  const _VideoTile({required this.video, required this.onRemove});
+  const _VideoTile({
+    required this.video,
+    required this.serviceLabel,
+    required this.onRemove,
+    required this.onToggleVisibility,
+    required this.onTapService,
+  });
 
   final MusicianVideo video;
+  final String serviceLabel;
   final VoidCallback onRemove;
+  final ValueChanged<bool> onToggleVisibility;
+  final VoidCallback onTapService;
 
   @override
   Widget build(BuildContext context) {
@@ -337,7 +391,98 @@ class _VideoTile extends StatelessWidget {
         ),
         _ViewsBadge(count: video.viewsCount),
         _DeleteBadge(onTap: onRemove),
+        _VisibilityBadge(
+          visible: video.showInProfile,
+          onTap: () => onToggleVisibility(!video.showInProfile),
+        ),
+        _ServiceTagBadge(
+          assigned: video.serviceId != null,
+          label: serviceLabel,
+          onTap: onTapService,
+        ),
       ],
+    );
+  }
+}
+
+/// Compact top-left tag — shows which `provider_services` listing this
+/// video is scoped to (see `supabase/schema.sql` §31), tap to reassign.
+/// Same tiny-badge-instead-of-full-control reasoning as
+/// [_VisibilityBadge]: a proper dropdown doesn't fit this tile.
+class _ServiceTagBadge extends StatelessWidget {
+  const _ServiceTagBadge({
+    required this.assigned,
+    required this.label,
+    required this.onTap,
+  });
+
+  final bool assigned;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: 4,
+      left: 4,
+      child: Tooltip(
+        message: assigned ? 'Servicio: $label' : 'Sin asignar: $label',
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.all(4),
+            decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+            child: Icon(
+              assigned ? Icons.storefront_outlined : Icons.help_outline,
+              size: 14,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Compact bottom-right toggle — lets the provider hide this one video
+/// from the client-facing "Portafolio" tab (`ServiceDetailScreen`)
+/// without deleting it from their own gallery. A tappable badge instead
+/// of a full [Switch]: a real switch's ~48dp default touch target
+/// doesn't fit next to [_ViewsBadge]/[_DeleteBadge] on a ~110dp tile: this
+/// keeps the same square footprint every other tile already uses.
+class _VisibilityBadge extends StatelessWidget {
+  const _VisibilityBadge({required this.visible, required this.onTap});
+
+  final bool visible;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      bottom: 4,
+      right: 4,
+      child: Tooltip(
+        message: visible
+            ? 'Visible en tu perfil de clientes'
+            : 'Solo visible en tu feed de músico, no aparece para clientes',
+        child: InkWell(
+          borderRadius: BorderRadius.circular(999),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: visible ? AppColors.profileAccent : Colors.black54,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              visible ? Icons.visibility : Icons.visibility_off,
+              size: 14,
+              color: visible ? Colors.black : Colors.white70,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
